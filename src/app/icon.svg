@@ -1,0 +1,19 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="14" fill="#0a0a0f"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" stroke="#a78bfa" stroke-opacity="0.35"/>
+  <!-- globe sphere -->
+  <circle cx="32" cy="32" r="18" stroke="#3a3a52" stroke-width="1.2"/>
+  <!-- lat/lng grid -->
+  <ellipse cx="32" cy="32" rx="8" ry="18" stroke="#3a3a52" stroke-width="1" opacity="0.7"/>
+  <ellipse cx="32" cy="32" rx="18" ry="7" stroke="#3a3a52" stroke-width="1" opacity="0.7"/>
+  <!-- blue incoming arc (who brought you) -->
+  <path d="M16 42 C 20 26, 36 18, 46 22" stroke="#5b9dff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <!-- purple outgoing arc (people you brought) -->
+  <path d="M44 20 C 52 26, 50 38, 42 44" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <!-- you node -->
+  <circle cx="44" cy="21" r="4.5" fill="#a78bfa" fill-opacity="0.25"/>
+  <circle cx="44" cy="21" r="2.4" fill="#ffffff"/>
+  <!-- distant node dots -->
+  <circle cx="17" cy="42" r="1.6" fill="#5b9dff"/>
+  <circle cx="42" cy="44" r="1.6" fill="#a78bfa"/>
+</svg>
