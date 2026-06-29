@@ -1,7 +1,14 @@
 /** Read-side queries: leaderboard, globe points, referrer card. DESIGN §5/§3. */
 import { sql } from "drizzle-orm";
 import { db } from "./index";
-import { metricsForNode, rankForReach, globeOverlayForNode } from "./graph";
+import { metricsForNode, rankForNodeId, globeOverlayForNode } from "./graph";
+import {
+  GLOBE_RAW_NODE_THRESHOLD,
+  GLOBE_RAW_POINT_LIMIT,
+  GLOBE_BIN_LIMIT,
+  GLOBE_ARC_LIMIT,
+  binDegreesForNodeCount,
+} from "@/lib/globe-lod";
 
 export type LeaderRow = {
   code: string;
@@ -50,15 +57,44 @@ export async function referrerCard(code: string) {
   return r.rows?.[0] ?? null;
 }
 
-export type GlobePoint = { lat: number; lng: number; v: 0 | 1 }; // v=verified
+export type GlobePoint = { lat: number; lng: number; v: 0 | 1; n?: number };
 export type GlobeArc = { sx: number; sy: number; ex: number; ey: number };
 
-/**
- * Globe payload. DESIGN §3 LOD: at small scale return raw human points; arcs only
- * for recent joins (sampled). At large scale this swaps to binned density tiles
- * (TODO when node count crosses threshold). Human nodes only.
- */
-export async function globeData(limit = 2000): Promise<{ points: GlobePoint[]; arcs: GlobeArc[] }> {
+export type GlobeData = {
+  mode: "raw" | "binned";
+  points: GlobePoint[];
+  arcs: GlobeArc[];
+  total: number;
+};
+
+async function humanGlobeNodeCount(): Promise<number> {
+  const r = (await db.execute(sql`
+    SELECT COUNT(*)::int AS n
+    FROM nodes
+    WHERE class = 'human' AND ephemeral = false AND lat IS NOT NULL;
+  `)) as unknown as { rows: { n: number }[] };
+  return Number(r.rows?.[0]?.n ?? 0);
+}
+
+async function globeDataArcs(): Promise<GlobeArc[]> {
+  const arcs = (await db.execute(sql`
+    SELECT c.lat AS sy, c.lng AS sx, p.lat AS ey, p.lng AS ex
+    FROM nodes c JOIN nodes p ON p.id = c.referrer_id
+    WHERE c.class = 'human' AND c.lat IS NOT NULL AND p.lat IS NOT NULL
+    ORDER BY c.created_at DESC
+    LIMIT ${GLOBE_ARC_LIMIT};
+  `)) as unknown as { rows: GlobeArc[] };
+
+  return (arcs.rows ?? []).map((a) => ({
+    sx: Number(a.sx),
+    sy: Number(a.sy),
+    ex: Number(a.ex),
+    ey: Number(a.ey),
+  }));
+}
+
+/** Individual node positions — used below GLOBE_RAW_NODE_THRESHOLD. */
+async function globeDataRaw(limit: number): Promise<GlobePoint[]> {
   const pts = (await db.execute(sql`
     SELECT lat, lng, (verified)::int AS v
     FROM nodes
@@ -67,21 +103,55 @@ export async function globeData(limit = 2000): Promise<{ points: GlobePoint[]; a
     LIMIT ${limit};
   `)) as unknown as { rows: GlobePoint[] };
 
-  // Recent referral arcs (child → parent), sampled.
-  const arcs = (await db.execute(sql`
-    SELECT c.lat AS sy, c.lng AS sx, p.lat AS ey, p.lng AS ex
-    FROM nodes c JOIN nodes p ON p.id = c.referrer_id
-    WHERE c.class = 'human' AND c.lat IS NOT NULL AND p.lat IS NOT NULL
-    ORDER BY c.created_at DESC
-    LIMIT 300;
-  `)) as unknown as { rows: GlobeArc[] };
+  return (pts.rows ?? []).map((p) => ({
+    lat: Number(p.lat),
+    lng: Number(p.lng),
+    v: (p.v ? 1 : 0) as 0 | 1,
+  }));
+}
 
-  return {
-    points: (pts.rows ?? []).map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), v: (p.v ? 1 : 0) as 0 | 1 })),
-    arcs: (arcs.rows ?? []).map((a) => ({
-      sx: Number(a.sx), sy: Number(a.sy), ex: Number(a.ex), ey: Number(a.ey),
-    })),
-  };
+/**
+ * Lat/lng grid density bins — used at scale instead of shipping millions of points.
+ * Each point is a bin centroid; `n` is the node count in that cell.
+ */
+async function globeDataBinned(limit: number, total: number): Promise<GlobePoint[]> {
+  const { binLat, binLng } = binDegreesForNodeCount(total);
+
+  const pts = (await db.execute(sql`
+    SELECT
+      AVG(lat)::float8 AS lat,
+      AVG(lng)::float8 AS lng,
+      COUNT(*)::int AS n,
+      MAX(CASE WHEN verified THEN 1 ELSE 0 END)::int AS v
+    FROM nodes
+    WHERE class = 'human' AND ephemeral = false AND lat IS NOT NULL
+    GROUP BY FLOOR(lat / ${binLat}), FLOOR(lng / ${binLng})
+    ORDER BY n DESC
+    LIMIT ${limit};
+  `)) as unknown as { rows: { lat: number; lng: number; n: number; v: number }[] };
+
+  return (pts.rows ?? []).map((p) => ({
+    lat: Number(p.lat),
+    lng: Number(p.lng),
+    v: (p.v ? 1 : 0) as 0 | 1,
+    n: Number(p.n),
+  }));
+}
+
+/**
+ * Globe payload. DESIGN §3 LOD: raw human points below threshold; binned density
+ * tiles above. Arcs are always a sampled stream of recent joins.
+ */
+export async function globeData(): Promise<GlobeData> {
+  const [total, arcs] = await Promise.all([humanGlobeNodeCount(), globeDataArcs()]);
+
+  if (total <= GLOBE_RAW_NODE_THRESHOLD) {
+    const points = await globeDataRaw(GLOBE_RAW_POINT_LIMIT);
+    return { mode: "raw", points, arcs, total };
+  }
+
+  const points = await globeDataBinned(GLOBE_BIN_LIMIT, total);
+  return { mode: "binned", points, arcs, total };
 }
 
 /**
@@ -131,9 +201,9 @@ export async function meDetail(code: string): Promise<{
 }
 
 /**
- * Single-query bundle for /api/me: node geo, referrer geo, capped children, cached
- * metrics, and rank — collapsing what used to be ~5 sequential round-trips per poll.
- * Metrics come from cached_metrics (denormalized) instead of a live subtree scan.
+ * Bundle for /api/me: globe overlay + metrics + rank.
+ * Unlinked devices read denormalized cached_metrics; multi-device accounts use live union.
+ * Rank always uses this node's cached reach (consistent with leaderboard).
  */
 export async function meBundle(code: string): Promise<{
   you: { lat: number; lng: number } | null;
@@ -152,7 +222,7 @@ export async function meBundle(code: string): Promise<{
 
   const metrics = await metricsForNode(node.id);
   const [rank, globe] = await Promise.all([
-    rankForReach(metrics.reach),
+    rankForNodeId(node.id),
     globeOverlayForNode(node.id),
   ]);
   if (!globe) return null;

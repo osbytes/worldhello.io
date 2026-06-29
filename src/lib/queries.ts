@@ -3,7 +3,7 @@
 import { useMutation, useQuery, type QueryClient } from "@tanstack/react-query";
 import { registerNode, type NodeResponse } from "./client-identity";
 import type { MeDetail } from "./types";
-import type { GlobePoint, GlobeArc, LeaderRow } from "@/db/reads";
+import type { GlobeData, LeaderRow } from "@/db/reads";
 
 export class ApiError extends Error {
   constructor(
@@ -85,13 +85,13 @@ export function useMe(code: string | undefined) {
 
 /** Ambient globe points + arcs. Polls. */
 export function useGlobe() {
-  return useQuery<{ points: GlobePoint[]; arcs: GlobeArc[] }>({
+  return useQuery<GlobeData>({
     queryKey: ["globe"],
-    queryFn: () => json("/api/globe"),
-    staleTime: 25_000, // cache between refetches (was 0 → refetched constantly)
+    queryFn: () => json<GlobeData>("/api/globe"),
+    staleTime: 25_000,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
-    placeholderData: { points: [], arcs: [] },
+    placeholderData: { mode: "raw", points: [], arcs: [], total: 0 },
   });
 }
 

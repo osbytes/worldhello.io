@@ -5,8 +5,9 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Line } from "@react-three/drei";
 import * as THREE from "three";
 import { GLOBE_RADIUS, latLngToVec3, arcPoints } from "@/lib/sphere";
+import { globeDotScale } from "@/lib/globe-lod";
 import { useGlobe } from "@/lib/queries";
-import type { GlobePoint, GlobeArc } from "@/db/reads";
+import type { GlobePoint, GlobeArc, GlobeData } from "@/db/reads";
 
 const PURPLE = "#a78bfa"; // people you brought (outgoing)
 const BLUE = "#5b9dff"; // who brought you (incoming)
@@ -42,7 +43,7 @@ function Dots({ points }: { points: GlobePoint[] }) {
     if (!mesh) return;
     points.forEach((p, i) => {
       dummy.position.copy(latLngToVec3(p.lat, p.lng, GLOBE_RADIUS + 0.004));
-      dummy.scale.setScalar(p.v ? 1.6 : 1);
+      dummy.scale.setScalar(globeDotScale(p));
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -132,7 +133,7 @@ function Scene({
   incoming,
   outgoing,
 }: {
-  data: { points: GlobePoint[]; arcs: GlobeArc[] };
+  data: GlobeData;
   you?: { lat: number; lng: number } | null;
   devices?: { lat: number; lng: number }[];
   incoming?: GlobeArc[];
@@ -178,7 +179,7 @@ export default function Globe({
   outgoing?: GlobeArc[];
 }) {
   const { data } = useGlobe();
-  const scene = data ?? { points: [], arcs: [] };
+  const scene: GlobeData = data ?? { mode: "raw", points: [], arcs: [], total: 0 };
 
   return (
     <Canvas camera={{ position: [0, 0, 5.6], fov: 42 }} dpr={[1, 2]} className="!absolute inset-0">

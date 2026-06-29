@@ -2,6 +2,7 @@ import { subscribe } from "@/lib/live-bus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
  * SSE live-join stream. Subscribes to the shared broadcaster (one DB poll loop per

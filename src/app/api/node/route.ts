@@ -37,6 +37,12 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
+
+  const cookieLocalId = req.cookies.get(COOKIE)?.value;
+  if (cookieLocalId && cookieLocalId !== parsed.data.localId) {
+    return NextResponse.json({ error: "identity_mismatch" }, { status: 403 });
+  }
+
   const { localId, fingerprint, ref, incognito, botd, src } = parsed.data;
 
   const h = req.headers;
@@ -123,7 +129,7 @@ export async function POST(req: NextRequest) {
 
   // ── Metric fan-out: only human nodes count toward ancestors' reach. ──
   if (isHuman(nodeClass)) {
-    await bumpAncestors(created);
+    await bumpAncestors(created, geo.country);
   }
 
   // ── Audit signal (append-only; risk advisory + acquisition source). ──

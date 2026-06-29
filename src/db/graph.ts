@@ -74,7 +74,10 @@ export async function createNode(input: CreateNodeInput): Promise<CreatedNode> {
  *
  * Only runs for human-class nodes (callers gate on this).
  */
-export async function bumpAncestors(newNode: CreatedNode): Promise<void> {
+export async function bumpAncestors(
+  newNode: CreatedNode,
+  country: string | null,
+): Promise<void> {
   // Ancestor ids = every label in the path except self.
   await db.execute(sql`
     WITH ancestors AS (
@@ -83,25 +86,40 @@ export async function bumpAncestors(newNode: CreatedNode): Promise<void> {
     real_ancestors AS (
       SELECT id FROM ancestors WHERE id <> ${newNode.id}
     )
-    INSERT INTO cached_metrics (node_id, reach, direct, max_depth, updated_at)
+    INSERT INTO cached_metrics (node_id, reach, direct, max_depth, countries, updated_at)
     SELECT
       ra.id,
       1,
       CASE WHEN ra.id = ${newNode.referrerId} THEN 1 ELSE 0 END,
       ${newNode.depth},
+      CASE WHEN ${country}::text IS NOT NULL THEN 1 ELSE 0 END,
       now()
     FROM real_ancestors ra
     ON CONFLICT (node_id) DO UPDATE SET
       reach = cached_metrics.reach + 1,
       direct = cached_metrics.direct + (CASE WHEN cached_metrics.node_id = ${newNode.referrerId} THEN 1 ELSE 0 END),
       max_depth = GREATEST(cached_metrics.max_depth, ${newNode.depth}),
+      countries = cached_metrics.countries + (
+        CASE
+          WHEN ${country}::text IS NOT NULL AND NOT EXISTS (
+            SELECT 1
+            FROM nodes n2
+            INNER JOIN nodes anc ON anc.id = cached_metrics.node_id
+            WHERE n2.path <@ anc.path
+              AND n2.id <> ${newNode.id}
+              AND n2.class = 'human'
+              AND n2.country = ${country}
+          ) THEN 1
+          ELSE 0
+        END
+      ),
       updated_at = now();
   `);
 
-  // Ensure the new node has its own (zeroed) metrics row.
+  const selfCountries = country != null ? 1 : 0;
   await db.execute(sql`
-    INSERT INTO cached_metrics (node_id, reach, direct, max_depth)
-    VALUES (${newNode.id}, 0, 0, ${newNode.depth})
+    INSERT INTO cached_metrics (node_id, reach, direct, max_depth, countries)
+    VALUES (${newNode.id}, 0, 0, ${newNode.depth}, ${selfCountries})
     ON CONFLICT (node_id) DO NOTHING;
   `);
 }
@@ -210,7 +228,25 @@ export async function accountMetrics(accountId: number): Promise<Metrics> {
   };
 }
 
-/** Per-node metrics, or account-aggregated when grouped with other devices. */
+/** Read denormalized per-node metrics (fast path for polls and leaderboard). */
+export async function cachedMetricsForNode(nodeId: number): Promise<Metrics | null> {
+  const r = (await db.execute(sql`
+    SELECT reach, direct, max_depth AS "maxDepth", countries
+    FROM cached_metrics
+    WHERE node_id = ${nodeId}
+    LIMIT 1;
+  `)) as unknown as { rows: Metrics[] };
+  const row = r.rows?.[0];
+  if (!row) return null;
+  return {
+    reach: Number(row.reach ?? 0),
+    direct: Number(row.direct ?? 0),
+    maxDepth: Number(row.maxDepth ?? 0),
+    countries: Number(row.countries ?? 0),
+  };
+}
+
+/** Per-node metrics from cache, or account-aggregated live scan when multi-device linked. */
 export async function metricsForNode(nodeId: number): Promise<Metrics> {
   const acc = (await db.execute(sql`
     SELECT account_id AS "accountId" FROM nodes WHERE id = ${nodeId} LIMIT 1;
@@ -223,10 +259,22 @@ export async function metricsForNode(nodeId: number): Promise<Metrics> {
     `)) as unknown as { rows: { n: number }[] };
     if ((siblings.rows?.[0]?.n ?? 0) > 0) return accountMetrics(accountId);
   }
+
+  const cached = await cachedMetricsForNode(nodeId);
+  if (cached) return cached;
   return subtreeMetrics(nodeId);
 }
 
-/** Leaderboard rank for a reach score (node or account-aggregated). */
+/** Rank from this node's cached reach (consistent with leaderboard). */
+export async function rankForNodeId(
+  nodeId: number,
+): Promise<{ rank: number; percentile: number } | null> {
+  const cached = await cachedMetricsForNode(nodeId);
+  if (!cached) return null;
+  return rankForReach(cached.reach);
+}
+
+/** Leaderboard rank for a reach score. */
 export async function rankForReach(
   reach: number,
 ): Promise<{ rank: number; percentile: number } | null> {

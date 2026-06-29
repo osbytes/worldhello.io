@@ -58,7 +58,7 @@ async function ensureNode(localId: string): Promise<{ id: number; code: string; 
       lat: p.lat,
       lng: p.lng,
     });
-    await bumpAncestors(anc);
+    await bumpAncestors(anc, p.country);
     parentId = anc.id;
   }
 
@@ -74,7 +74,7 @@ async function ensureNode(localId: string): Promise<{ id: number; code: string; 
     lat: p.lat,
     lng: p.lng,
   });
-  await bumpAncestors(you);
+  await bumpAncestors(you, p.country);
   return { id: you.id, code: you.code, hasReferrer: true };
 }
 
@@ -97,7 +97,7 @@ async function spawnChild(referrerId: number, tag: string) {
   if (Math.random() > 0.8) {
     await db.execute(sql`UPDATE nodes SET verified = true WHERE id = ${node.id};`);
   }
-  await bumpAncestors(node);
+  await bumpAncestors(node, p.country);
   return node;
 }
 

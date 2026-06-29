@@ -44,7 +44,7 @@ async function main() {
       await db.execute(sql`UPDATE nodes SET verified = true WHERE id = ${node.id};`);
     }
 
-    await bumpAncestors(node);
+    await bumpAncestors(node, country);
   }
   console.log("Seed complete.");
 }

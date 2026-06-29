@@ -2,8 +2,10 @@
  * Email sending with graceful fallback:
  *   1. Resend          — if RESEND_API_KEY is set (preferred in prod)
  *   2. SMTP/nodemailer — if SMTP_HOST is set (self-hosted / local Mailpit etc.)
- *   3. dev console      — otherwise, log the message (local dev, no creds)
+ *   3. dev console      — otherwise, log the message (local dev only)
  */
+import { isProduction } from "@/lib/env";
+
 type Mail = { to: string; subject: string; html: string };
 
 const FROM = process.env.EMAIL_FROM || "hello@worldhello.io";
@@ -21,7 +23,7 @@ export async function sendMail(mail: Mail): Promise<void> {
     const transport = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT || 587),
-      secure: process.env.SMTP_SECURE === "true", // true for 465, false for 587/STARTTLS
+      secure: process.env.SMTP_SECURE === "true",
       auth:
         process.env.SMTP_USER && process.env.SMTP_PASS
           ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
@@ -31,8 +33,10 @@ export async function sendMail(mail: Mail): Promise<void> {
     return;
   }
 
-  // No provider configured — dev only. Log subject + a preview, never anything sensitive
-  // in plaintext beyond what the caller put in `html` (caller controls that).
+  if (isProduction()) {
+    throw new Error("No email provider configured — set RESEND_API_KEY or SMTP_HOST in production");
+  }
+
   console.log(`[mailer:dev] to=${mail.to} subject="${mail.subject}"`);
   console.log(`[mailer:dev] html:\n${mail.html}`);
 }
