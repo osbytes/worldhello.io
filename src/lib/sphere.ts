@@ -20,9 +20,12 @@ export function arcPoints(
   const start = latLngToVec3(sLat, sLng);
   const end = latLngToVec3(eLat, eLng);
   const dist = start.distanceTo(end);
-  // Bow height grows with arc length but is clamped so long arcs hug the sphere
-  // instead of flying far past its silhouette (and getting clipped by the canvas).
-  const lift = GLOBE_RADIUS + Math.min(dist * 0.22, GLOBE_RADIUS * 0.35);
+  // Bow height grows with arc length but is clamped on both ends: a minimum floor
+  // keeps near-coincident endpoints from collapsing into a flat (invisible) arc,
+  // and the max stops long arcs from flying past the silhouette and getting clipped.
+  const MIN_BOW = GLOBE_RADIUS * 0.06;
+  const MAX_BOW = GLOBE_RADIUS * 0.35;
+  const lift = GLOBE_RADIUS + Math.min(Math.max(dist * 0.22, MIN_BOW), MAX_BOW);
   const pts: THREE.Vector3[] = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
