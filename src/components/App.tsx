@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { initBotId } from "botid/client/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { invalidateAfterLinkChange, useRegister, useMe } from "@/lib/queries";
-import { acceptLinkFromUrl } from "./sections/LinkDeviceSection";
+import { invalidateAfterLinkChange, useRegister, useMe, acceptLinkFromUrl } from "@/lib/queries";
 import Header from "./sections/Header";
 import Hero from "./sections/Hero";
 import Network from "./sections/Network";

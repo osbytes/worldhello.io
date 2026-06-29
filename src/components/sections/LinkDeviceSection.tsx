@@ -2,47 +2,36 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { invalidateAfterLinkChange } from "@/lib/queries";
 import QRCode from "qrcode";
+import {
+  ApiError,
+  invalidateAfterLinkChange,
+  useAccount,
+  useAcceptLinkCode,
+  useCreateLinkSession,
+  useSendMagicEmail,
+  useUnlinkDevice,
+} from "@/lib/queries";
 
-type LinkSession = { code: string; url: string; expiresIn: number };
-
-type AccountStatus = {
-  emailVerified: boolean;
-  devicesLinked: boolean;
-  siblingCount: number;
-};
-
-function useAccountStatus() {
-  const [status, setStatus] = useState<AccountStatus | null>(null);
-  const refresh = useCallback(async () => {
-    try {
-      const r = await fetch("/api/auth/account");
-      if (r.ok) setStatus((await r.json()) as AccountStatus);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-  return { status, refresh };
+function linkAcceptErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "same_device") return "Same device — open this on your other phone or laptop.";
+    if (err.code === "invalid_code") return "Invalid or expired code.";
+    if (err.status === 429) return "Too many attempts — wait a minute.";
+  }
+  return "Could not link devices.";
 }
 
 /** Email magic-link verification — proves identity, separate from device linking. */
 export function VerifyEmailPanel() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
-  const { status } = useAccountStatus();
+  const { data: status } = useAccount();
+  const sendMagic = useSendMagicEmail();
 
-  const sendMagic = async (e: React.FormEvent) => {
+  const sendMagicLink = (e: React.FormEvent) => {
     e.preventDefault();
-    const r = await fetch("/api/auth/magic", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (r.ok) setSent(true);
+    sendMagic.mutate(email, { onSuccess: () => setSent(true) });
   };
 
   return (
@@ -64,7 +53,7 @@ export function VerifyEmailPanel() {
       ) : sent ? (
         <p className="mt-4 text-sm text-purple">Check your inbox — click the link to verify.</p>
       ) : (
-        <form onSubmit={sendMagic} className="mt-5 flex max-w-md flex-col gap-2">
+        <form onSubmit={sendMagicLink} className="mt-5 flex max-w-md flex-col gap-2">
           <div className="flex gap-2">
             <input
               type="email"
@@ -74,8 +63,12 @@ export function VerifyEmailPanel() {
               placeholder="you@email.com"
               className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none placeholder:text-muted/50 focus:border-purple/50"
             />
-            <button className="btn-ghost shrink-0 whitespace-nowrap border-purple/40 px-4 py-3 text-sm text-purple">
-              Send link
+            <button
+              type="submit"
+              disabled={sendMagic.isPending}
+              className="btn-ghost shrink-0 whitespace-nowrap border-purple/40 px-4 py-3 text-sm text-purple"
+            >
+              {sendMagic.isPending ? "Sending…" : "Send link"}
             </button>
           </div>
         </form>
@@ -87,95 +80,66 @@ export function VerifyEmailPanel() {
 /** Sync stats and globe across devices you own — reversible via unlink. */
 export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
   const queryClient = useQueryClient();
-  const { status, refresh } = useAccountStatus();
-  const [session, setSession] = useState<LinkSession | null>(null);
+  const { data: status } = useAccount();
+  const createLink = useCreateLinkSession();
+  const acceptLink = useAcceptLinkCode();
+  const unlinkDevice = useUnlinkDevice();
+  const session = createLink.data ?? null;
   const [linkQr, setLinkQr] = useState("");
-  const [loading, setLoading] = useState(false);
   const [enterCode, setEnterCode] = useState("");
   const [linkMsg, setLinkMsg] = useState<"idle" | "linked" | "unlinked" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [confirmUnlink, setConfirmUnlink] = useState(false);
 
+  const loading = createLink.isPending || acceptLink.isPending || unlinkDevice.isPending;
+
   const refreshAll = useCallback(() => {
     invalidateAfterLinkChange(queryClient, nodeCode);
-    void refresh();
-  }, [queryClient, nodeCode, refresh]);
+  }, [queryClient, nodeCode]);
 
-  const createCode = async () => {
-    setLoading(true);
+  const createCode = () => {
     setLinkMsg("idle");
     setErrorMsg("");
-    try {
-      const r = await fetch("/api/auth/link", { method: "POST" });
-      if (!r.ok) {
-        setErrorMsg(r.status === 429 ? "Too many codes — try again later." : "Could not create code.");
-        return;
-      }
-      setSession((await r.json()) as LinkSession);
-    } catch {
-      setErrorMsg("Could not create code.");
-    } finally {
-      setLoading(false);
-    }
+    createLink.mutate(undefined, {
+      onError: (err) => {
+        setErrorMsg(
+          err instanceof ApiError && err.status === 429
+            ? "Too many codes — try again later."
+            : "Could not create code.",
+        );
+      },
+    });
   };
 
   const acceptCode = async (raw: string) => {
     const code = raw.trim().toLowerCase();
     if (code.length !== 6) return false;
 
-    setLoading(true);
     setLinkMsg("idle");
     setErrorMsg("");
     try {
-      const r = await fetch("/api/auth/link/accept", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      if (!r.ok) {
-        const body = (await r.json().catch(() => null)) as { error?: string } | null;
-        if (body?.error === "same_device") {
-          setErrorMsg("Same device — open this on your other phone or laptop.");
-        } else if (body?.error === "invalid_code") {
-          setErrorMsg("Invalid or expired code.");
-        } else if (r.status === 429) {
-          setErrorMsg("Too many attempts — wait a minute.");
-        } else {
-          setErrorMsg("Could not link devices.");
-        }
-        setLinkMsg("error");
-        return false;
-      }
+      await acceptLink.mutateAsync(code);
       setLinkMsg("linked");
       setEnterCode("");
       refreshAll();
       return true;
-    } catch {
-      setErrorMsg("Could not link devices.");
+    } catch (err) {
+      setErrorMsg(linkAcceptErrorMessage(err));
       setLinkMsg("error");
       return false;
-    } finally {
-      setLoading(false);
     }
   };
 
-  const unlink = async () => {
-    setLoading(true);
+  const unlink = () => {
     setErrorMsg("");
-    try {
-      const r = await fetch("/api/auth/unlink", { method: "POST" });
-      if (!r.ok) {
-        setErrorMsg("Could not unlink this device.");
-        return;
-      }
-      setConfirmUnlink(false);
-      setLinkMsg("unlinked");
-      refreshAll();
-    } catch {
-      setErrorMsg("Could not unlink this device.");
-    } finally {
-      setLoading(false);
-    }
+    unlinkDevice.mutate(undefined, {
+      onSuccess: () => {
+        setConfirmUnlink(false);
+        setLinkMsg("unlinked");
+        refreshAll();
+      },
+      onError: () => setErrorMsg("Could not unlink this device."),
+    });
   };
 
   useEffect(() => {
@@ -340,24 +304,4 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
       )}
     </div>
   );
-}
-
-/** Accept a ?link= code after registration; strips the param on success. */
-export async function acceptLinkFromUrl(code: string): Promise<boolean> {
-  const normalized = code.trim().toLowerCase();
-  if (normalized.length !== 6) return false;
-
-  const r = await fetch("/api/auth/link/accept", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: normalized }),
-  });
-  if (!r.ok) return false;
-
-  if (typeof window !== "undefined") {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("link");
-    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-  }
-  return true;
 }
