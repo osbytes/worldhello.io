@@ -35,7 +35,7 @@ export function VerifyEmailPanel() {
   };
 
   return (
-    <div id="verify" className="card mt-5 p-6">
+    <div id="verify" className="card mt-5 p-4 sm:p-6">
       <div className="flex items-center gap-2">
         <span className="flex h-7 w-7 items-center justify-center rounded-md border border-purple/40 text-purple">
           ✉
@@ -54,19 +54,19 @@ export function VerifyEmailPanel() {
         <p className="mt-4 text-sm text-purple">Check your inbox — click the link to verify.</p>
       ) : (
         <form onSubmit={sendMagicLink} className="mt-5 flex max-w-md flex-col gap-2">
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@email.com"
-              className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none placeholder:text-muted/50 focus:border-purple/50"
+              className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none placeholder:text-muted/50 focus:border-purple/50"
             />
             <button
               type="submit"
               disabled={sendMagic.isPending}
-              className="btn-ghost shrink-0 whitespace-nowrap border-purple/40 px-4 py-3 text-sm text-purple"
+              className="btn-ghost w-full shrink-0 whitespace-nowrap border-purple/40 px-4 py-3 text-sm text-purple sm:w-auto"
             >
               {sendMagic.isPending ? "Sending…" : "Send link"}
             </button>
@@ -157,7 +157,7 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
   }, [session?.url]);
 
   return (
-    <div id="devices" className="card mt-5 p-6">
+    <div id="devices" className="card mt-5 p-4 sm:p-6">
       <div className="flex items-center gap-2">
         <span className="flex h-7 w-7 items-center justify-center rounded-md border border-blue/40 text-blue">
           ⇄
@@ -183,8 +183,8 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
         </p>
       )}
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <div className="rounded-xl border border-white/10 bg-black/20 p-5">
+      <div className="mt-6 grid min-w-0 gap-5 lg:grid-cols-2">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-black/20 p-4 sm:p-5">
           <div className="label text-blue">On this device</div>
           <p className="mt-2 text-sm text-muted">Generate a code for your other device to enter.</p>
           {session ? (
@@ -219,7 +219,7 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
           )}
         </div>
 
-        <div className="rounded-xl border border-dashed border-white/10 bg-black/10 p-5">
+        <div className="min-w-0 rounded-xl border border-dashed border-white/10 bg-black/10 p-4 sm:p-5">
           <div className="label">On your other device</div>
           <p className="mt-2 text-sm text-muted">Enter the code from your desktop or scan its QR.</p>
           <form
@@ -227,7 +227,7 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
               e.preventDefault();
               void acceptCode(enterCode);
             }}
-            className="mt-3 flex gap-2"
+            className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch"
           >
             <input
               type="text"
@@ -242,12 +242,12 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
                 )
               }
               placeholder="6-char code"
-              className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-sm tracking-widest outline-none placeholder:text-muted/50 focus:border-blue/50"
+              className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-sm tracking-widest outline-none placeholder:text-muted/50 focus:border-blue/50"
             />
             <button
               type="submit"
               disabled={loading || enterCode.length !== 6}
-              className="btn-ghost shrink-0 border-blue/40 px-4 py-3 text-sm text-blue"
+              className="btn-ghost w-full shrink-0 border-blue/40 px-4 py-3 text-sm text-blue sm:w-auto"
             >
               Link
             </button>
@@ -268,7 +268,7 @@ export function LinkDevicesPanel({ nodeCode }: { nodeCode: string }) {
               Unlink this device
             </button>
           ) : (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:p-5">
               <h4 className="text-sm font-semibold text-amber-200">Unlink this device?</h4>
               <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
                 <li>

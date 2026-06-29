@@ -32,7 +32,7 @@ export default function ShareSection({ code, fpLabel }: { code: string; fpLabel:
   };
 
   return (
-    <section id="share" className="mx-auto w-full max-w-6xl overflow-x-clip px-6 py-24">
+    <section id="share" className="mx-auto w-full max-w-6xl overflow-x-clip px-4 py-24 sm:px-6">
       <h2 className="text-4xl font-bold tracking-tight">Share &amp; account</h2>
       <p className="mt-3 max-w-2xl text-muted">
         Three separate things: invite <span className="text-fg">other people</span> with your share
@@ -52,14 +52,17 @@ export default function ShareSection({ code, fpLabel }: { code: string; fpLabel:
           Your public referral link — send it to anyone. Each new visitor adds a node to your chain.
         </p>
 
-        <div className="mt-5 grid gap-5 lg:grid-cols-[1.6fr_1fr]">
-          <div className="card p-6">
+        <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[1.6fr_1fr]">
+          <div className="card min-w-0 p-4 sm:p-6">
             <div className="label text-purple">Your share link</div>
-            <div className="mt-3 flex gap-3">
-              <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-xl border border-white/10 bg-black/30 px-4 py-3 font-mono text-sm">
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-xl border border-white/10 bg-black/30 px-3 py-3 font-mono text-sm sm:px-4">
                 <span className="truncate">{display}</span>
               </div>
-              <button onClick={copy} className="btn-primary shrink-0 px-6 py-3 text-sm">
+              <button
+                onClick={copy}
+                className="btn-primary w-full shrink-0 px-6 py-3 text-sm sm:w-auto"
+              >
                 {copied ? "Copied!" : "Copy"}
               </button>
             </div>
@@ -81,7 +84,7 @@ export default function ShareSection({ code, fpLabel }: { code: string; fpLabel:
             </div>
           </div>
 
-          <div className="card flex flex-col items-center justify-center p-6">
+          <div className="card flex min-w-0 flex-col items-center justify-center p-4 sm:p-6">
             {qr && <img src={qr} alt="Share link QR" className="h-44 w-44 rounded-xl" />}
             <p className="label mt-4 text-purple">For others — scan to join your web</p>
           </div>

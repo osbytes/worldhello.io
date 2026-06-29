@@ -33,10 +33,12 @@ function ChainStrip({ node, m }: { node: NodeResponse | null; m?: { direct: numb
   const Node = ({
     glyph,
     title,
+    shortTitle,
     state,
   }: {
     glyph: string;
     title: string;
+    shortTitle?: string;
     state: "dim" | "blue" | "you" | "purple";
   }) => {
     const ring =
@@ -48,32 +50,39 @@ function ChainStrip({ node, m }: { node: NodeResponse | null; m?: { direct: numb
             ? "border-purple/60 text-purple"
             : "border-white/15 text-muted";
     return (
-      <div className="flex w-16 shrink-0 flex-col items-center text-center sm:w-20">
-        <div className={`flex h-11 w-11 items-center justify-center rounded-full border text-xs font-semibold ${ring}`}>
+      <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold sm:h-11 sm:w-11 sm:text-xs ${ring}`}
+        >
           {glyph}
         </div>
-        <div className={`mt-2 text-[11px] leading-tight ${state === "you" ? "text-purple" : "text-muted"}`}>
-          {title}
+        <div
+          className={`mt-1.5 max-w-full px-0.5 text-[10px] leading-tight sm:mt-2 sm:text-[11px] ${state === "you" ? "text-purple" : "text-muted"}`}
+        >
+          <span className="sm:hidden">{shortTitle ?? title}</span>
+          <span className="hidden sm:inline">{title}</span>
         </div>
       </div>
     );
   };
   const Link = ({ color }: { color: "blue" | "purple" }) => (
-    <div className="mx-1 mb-6 h-px min-w-4 flex-1 self-center sm:min-w-6"
-      style={{ background: `linear-gradient(90deg, transparent, var(--${color}), transparent)` }} />
+    <div
+      className="mx-0.5 mb-5 h-px min-w-2 flex-1 self-center sm:mx-1 sm:mb-6 sm:min-w-4"
+      style={{ background: `linear-gradient(90deg, transparent, var(--${color}), transparent)` }}
+    />
   );
 
   return (
-    <div className="card mt-4 overflow-hidden px-4 py-5 sm:px-6">
+    <div className="card mt-4 p-4 sm:p-6">
       <div className="label mb-4">where you sit in the web</div>
-      <div className="flex items-start justify-between">
-        <Node glyph="↗" title="shared with you" state="blue" />
+      <div className="flex min-w-0 items-start justify-between">
+        <Node glyph="↗" title="shared with you" shortTitle="from" state="blue" />
         <Link color="blue" />
-        <Node glyph="YOU" title="this device" state="you" />
+        <Node glyph="YOU" title="this device" shortTitle="you" state="you" />
         <Link color="purple" />
-        <Node glyph={`×${direct}`} title="you shared" state="purple" />
+        <Node glyph={`×${direct}`} title="you shared" shortTitle="out" state="purple" />
         <Link color="purple" />
-        <Node glyph={fmtCompact(reach)} title="downstream" state="dim" />
+        <Node glyph={fmtCompact(reach)} title="downstream" shortTitle="reach" state="dim" />
       </div>
     </div>
   );
@@ -82,7 +91,7 @@ function ChainStrip({ node, m }: { node: NodeResponse | null; m?: { direct: numb
 export default function Network({ node, me }: { node: NodeResponse | null; me: MeDetail | null }) {
   const m = me?.metrics ?? node?.metrics;
   return (
-    <section id="network" className="mx-auto w-full max-w-6xl overflow-x-clip px-6 py-24">
+    <section id="network" className="mx-auto w-full max-w-6xl overflow-x-clip px-4 py-24 sm:px-6">
       <div className="mb-10 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Your network</h2>
