@@ -6,6 +6,7 @@ import { newLinkCode } from "@/lib/codes";
 import { logApiError, logApiReject } from "@/lib/api-log";
 import { LINK_TTL_MS } from "@/lib/token";
 import { admitLinkCreate } from "@/lib/ratelimit";
+import { siteBaseUrl } from "@/lib/site";
 
 export const runtime = "nodejs";
 
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const base = process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin;
+  const base = siteBaseUrl(req.nextUrl.origin);
   const url = `${base}/?link=${code}`;
 
   return NextResponse.json({

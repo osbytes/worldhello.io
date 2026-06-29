@@ -1,5 +1,7 @@
 "use client";
 
+import { siteHost } from "@/lib/site";
+
 /** The worldhello globe mark — wireframe sphere with blue (incoming) + purple
  *  (outgoing) arcs and a you-node. Matches app/icon.svg. */
 function LogoMark() {
@@ -20,13 +22,13 @@ function LogoMark() {
 }
 
 export default function Header({ fpLabel }: { fpLabel: string }) {
+  const site = siteHost(typeof window !== "undefined" ? window.location.origin : "");
+
   return (
     <header className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-6 py-4 backdrop-blur-sm">
       <a href="#" className="flex items-center gap-2.5">
         <LogoMark />
-        <span className="text-base font-semibold">
-          worldhello<span className="text-muted">.io</span>
-        </span>
+        {site ? <span className="text-base font-semibold">{site}</span> : null}
       </a>
       <div className="flex items-center gap-3">
         <span className="chip hidden items-center gap-2 !rounded-full !px-3 !py-1.5 font-mono text-xs text-muted sm:flex">

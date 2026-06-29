@@ -3,6 +3,7 @@ import { verifyNonce } from "@/lib/token";
 import { logApiReject } from "@/lib/api-log";
 import { executeMagicVerify, magicTokenStatus } from "@/lib/magic-verify";
 import type { VerifyFailureReason } from "@/lib/verify-feedback";
+import { siteHost } from "@/lib/site";
 
 export const runtime = "nodejs";
 
@@ -27,12 +28,13 @@ export async function GET(req: NextRequest) {
   }
 
   const safeToken = escapeHtml(token!);
+  const host = escapeHtml(siteHost(req.nextUrl.origin));
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Verify email — worldhello.io</title>
+  <title>Verify email — ${host}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem; color: #e8e8e8; background: #0a0a0f; }
     h1 { font-size: 1.25rem; font-weight: 600; }
@@ -43,7 +45,7 @@ export async function GET(req: NextRequest) {
 </head>
 <body>
   <h1>Verify your account</h1>
-  <p>Confirm on <strong>the same device</strong> that requested this email. This verifies your account — it does not link other devices.</p>
+  <p>Confirm on <strong>the same device</strong> that requested this email. Your linked devices stay connected — this makes this device the verified primary for the group.</p>
   <form method="POST" action="/api/auth/verify">
     <input type="hidden" name="token" value="${safeToken}" />
     <button type="submit">Verify my account</button>

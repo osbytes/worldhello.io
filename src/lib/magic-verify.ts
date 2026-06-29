@@ -19,8 +19,9 @@ export async function magicTokenStatus(nonce: string): Promise<MagicTokenStatus>
 }
 
 /**
- * Consume a magic-link token and link the requesting device to its email account.
- * Single SQL round-trip: delete token → upsert account → update node.
+ * Consume a magic-link token and attach the device group to its email account.
+ * Single SQL round-trip: delete token → upsert email account → move verifying
+ * device plus any already-linked siblings onto that account.
  * Caller must confirm `deviceLocalId` matches the cookie on the requesting device.
  */
 export async function executeMagicVerify(
@@ -46,6 +47,11 @@ export async function executeMagicVerify(
         AND local_id = ${deviceLocalId}
       RETURNING email_hash, local_id
     ),
+    pre AS (
+      SELECT n.account_id AS old_account_id
+      FROM nodes n
+      WHERE n.local_id = (SELECT local_id FROM consumed LIMIT 1)
+    ),
     acc AS (
       INSERT INTO accounts (email_hash)
       SELECT email_hash FROM consumed
@@ -56,11 +62,17 @@ export async function executeMagicVerify(
       UPDATE nodes n
       SET
         account_id = (SELECT id FROM acc LIMIT 1),
-        verified = true,
+        verified = (n.local_id = (SELECT local_id FROM consumed LIMIT 1)),
         ephemeral = false
-      WHERE n.local_id = (SELECT local_id FROM consumed LIMIT 1)
-        AND EXISTS (SELECT 1 FROM consumed)
+      WHERE EXISTS (SELECT 1 FROM consumed)
         AND EXISTS (SELECT 1 FROM acc)
+        AND (
+          n.local_id = (SELECT local_id FROM consumed LIMIT 1)
+          OR (
+            (SELECT old_account_id FROM pre LIMIT 1) IS NOT NULL
+            AND n.account_id = (SELECT old_account_id FROM pre LIMIT 1)
+          )
+        )
       RETURNING n.id
     )
     SELECT

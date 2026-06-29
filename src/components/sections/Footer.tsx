@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { siteHost } from "@/lib/site";
 
 export default function Footer() {
+  const site = siteHost();
   return (
     <footer className="border-t border-white/5 px-6 py-10">
       <div className="mx-auto w-full max-w-6xl">
@@ -11,7 +13,7 @@ export default function Footer() {
         </p>
         <div className="mt-8 flex flex-col items-center justify-between gap-4 text-sm text-muted sm:flex-row">
           <div className="flex items-center gap-4">
-            <span>worldhello.io</span>
+            {site ? <span>{site}</span> : null}
             <Link href="/about" className="hover:text-fg">
               About &amp; privacy
             </Link>

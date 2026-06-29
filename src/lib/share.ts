@@ -1,17 +1,25 @@
 /** Share intents per platform. DESIGN §8. */
 
-export function shareUrl(code: string): string {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}/${code}`;
+import { siteBaseUrl, siteHost } from "@/lib/site";
+
+function clientOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
 }
 
-const TEXT = "I just joined the chain on worldhello.io — see how far our connection travels 🌍";
+export function shareUrl(code: string): string {
+  return `${siteBaseUrl(clientOrigin())}/${code}`;
+}
+
+export function shareBlurb(): string {
+  const host = siteHost(clientOrigin());
+  return `I just joined the chain on ${host} — see how far our connection travels 🌍`;
+}
 
 export type Platform = "x" | "whatsapp" | "telegram" | "facebook" | "linkedin";
 
 export function intentUrl(platform: Platform, url: string): string {
   const u = encodeURIComponent(url);
-  const t = encodeURIComponent(TEXT);
+  const t = encodeURIComponent(shareBlurb());
   switch (platform) {
     case "x":
       return `https://twitter.com/intent/tweet?text=${t}&url=${u}`;
@@ -29,7 +37,7 @@ export function intentUrl(platform: Platform, url: string): string {
 export async function nativeShare(url: string): Promise<boolean> {
   if (typeof navigator !== "undefined" && navigator.share) {
     try {
-      await navigator.share({ title: "worldhello.io", text: TEXT, url });
+      await navigator.share({ title: siteHost(clientOrigin()), text: shareBlurb(), url });
       return true;
     } catch {
       return false;

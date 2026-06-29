@@ -8,6 +8,7 @@ import { sendMail } from "@/lib/mailer";
 import { logApiReject } from "@/lib/api-log";
 import { admitMagic } from "@/lib/ratelimit";
 import { clientIp } from "@/lib/geo";
+import { siteBaseUrl, siteHost } from "@/lib/site";
 
 export const runtime = "nodejs";
 
@@ -41,13 +42,14 @@ export async function POST(req: NextRequest) {
         expiresAt,
       });
 
-      const base = process.env.NEXT_PUBLIC_BASE_URL || req.nextUrl.origin;
+      const base = siteBaseUrl(req.nextUrl.origin);
+      const host = siteHost(req.nextUrl.origin);
       const link = `${base}/api/auth/verify?token=${encodeURIComponent(token)}`;
 
       await sendMail({
         to: email,
-        subject: "Verify your worldhello.io account",
-        html: `<p>Click below to verify your account on worldhello.io:</p><p><a href="${link}">Verify my account</a></p><p>Confirm on the same device that requested this email. This proves the network belongs to you — it is not for linking other devices. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
+        subject: `Verify your ${host} account`,
+        html: `<p>Click below to verify your account on ${host}:</p><p><a href="${link}">Verify my account</a></p><p>Confirm on the same device that requested this email. Linked devices stay connected. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
       }).catch((err) => {
         console.error("[auth/magic] send failed:", err);
       });

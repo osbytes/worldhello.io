@@ -3,6 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import Providers from "@/components/Providers";
+import { siteHost } from "@/lib/site";
+
+const site = siteHost();
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,11 +18,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "worldhello.io — watch your link reach the world",
+  title: site ? `${site} — watch your link reach the world` : "watch your link reach the world",
   description:
     "Share one link and watch it travel the globe in real time. Anonymous, no sign-up.",
   openGraph: {
-    title: "worldhello.io",
+    title: site || "watch your link reach the world",
     description: "Share one link, watch your reach spread across the world.",
     type: "website",
   },

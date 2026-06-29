@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { siteHost } from "@/lib/site";
+
+const site = siteHost();
 
 export const metadata: Metadata = {
-  title: "About — worldhello.io",
+  title: site ? `About — ${site}` : "About",
   description: "Why worldhello exists, and the privacy-preserving techniques behind it.",
 };
 
