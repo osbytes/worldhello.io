@@ -43,8 +43,8 @@ export async function POST(req: NextRequest) {
 
       await sendMail({
         to: email,
-        subject: "Link your worldhello.io network",
-        html: `<p>Click to keep your network across devices:</p><p><a href="${link}">Verify &amp; link</a></p><p>You must confirm on the same device that requested this email. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
+        subject: "Verify your worldhello.io account",
+        html: `<p>Click below to verify your account on worldhello.io:</p><p><a href="${link}">Verify my account</a></p><p>Confirm on the same device that requested this email. This proves the network belongs to you — it is not for linking other devices. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
       }).catch((err) => {
         console.error("[auth/magic] send failed:", err);
       });

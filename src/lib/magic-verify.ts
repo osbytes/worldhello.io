@@ -2,6 +2,21 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db";
 
 export type MagicVerifyResult = "ok" | "token_invalid" | "device_mismatch";
+export type MagicTokenStatus = "valid" | "expired" | "absent";
+
+/** Whether a nonce still exists and is unexpired (non-consuming). */
+export async function magicTokenStatus(nonce: string): Promise<MagicTokenStatus> {
+  const r = (await db.execute(sql`
+    SELECT (expires_at > now()) AS "stillValid"
+    FROM magic_tokens
+    WHERE nonce = ${nonce}
+    LIMIT 1;
+  `)) as unknown as { rows: { stillValid: boolean }[] };
+
+  const row = r.rows?.[0];
+  if (!row) return "absent";
+  return row.stillValid ? "valid" : "expired";
+}
 
 /**
  * Consume a magic-link token and link the requesting device to its email account.

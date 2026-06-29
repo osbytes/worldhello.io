@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyNonce } from "@/lib/token";
-import { peekMagicToken, executeMagicVerify } from "@/lib/magic-verify";
+import { executeMagicVerify, magicTokenStatus } from "@/lib/magic-verify";
+import type { VerifyFailureReason } from "@/lib/verify-feedback";
 
 export const runtime = "nodejs";
 
@@ -14,8 +15,10 @@ const COOKIE = "wh_lid";
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
   const nonce = token ? verifyNonce(token) : null;
-  if (!nonce || !(await peekMagicToken(nonce))) {
-    return failRedirect(req);
+  if (!nonce) return failRedirect(req, "invalid");
+  const status = await magicTokenStatus(nonce);
+  if (status !== "valid") {
+    return failRedirect(req, status === "expired" ? "expired" : "used");
   }
 
   const safeToken = escapeHtml(token!);
@@ -34,11 +37,11 @@ export async function GET(req: NextRequest) {
   </style>
 </head>
 <body>
-  <h1>Link your network</h1>
-  <p>Confirm on <strong>the same device</strong> that requested this email. Verification keeps your referral stats if you switch browsers or devices later.</p>
+  <h1>Verify your account</h1>
+  <p>Confirm on <strong>the same device</strong> that requested this email. This verifies your account — it does not link other devices.</p>
   <form method="POST" action="/api/auth/verify">
     <input type="hidden" name="token" value="${safeToken}" />
-    <button type="submit">Verify &amp; link email</button>
+    <button type="submit">Verify my account</button>
   </form>
 </body>
 </html>`;
@@ -61,7 +64,8 @@ export async function POST(req: NextRequest) {
 
   const nonce = token ? verifyNonce(token) : null;
   const deviceLocalId = req.cookies.get(COOKIE)?.value;
-  if (!nonce || !deviceLocalId) return failRedirect(req);
+  if (!nonce) return failRedirect(req, "invalid");
+  if (!deviceLocalId) return failRedirect(req, "no_session");
 
   try {
     const result = await executeMagicVerify(nonce, deviceLocalId);
@@ -69,43 +73,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL("/?verified=1", req.nextUrl.origin));
     }
     if (result === "device_mismatch") {
-      return mismatchPage(req);
+      return failRedirect(req, "wrong_device");
+    }
+    if (result === "token_invalid") {
+      return failRedirectForToken(req, nonce);
     }
   } catch (err) {
     console.error("[auth/verify] magic verify failed:", err);
+    return failRedirect(req, "error");
   }
 
-  return failRedirect(req);
+  return failRedirect(req, "error");
 }
 
-function failRedirect(req: NextRequest) {
-  return NextResponse.redirect(new URL("/?verify=failed", req.nextUrl.origin));
+function failRedirect(req: NextRequest, reason: VerifyFailureReason) {
+  return NextResponse.redirect(new URL(`/?verify=${reason}`, req.nextUrl.origin));
 }
 
-function mismatchPage(req: NextRequest) {
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Verification failed — worldhello.io</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem; color: #e8e8e8; background: #0a0a0f; }
-    h1 { font-size: 1.25rem; }
-    p { color: #a0a0b0; line-height: 1.5; }
-    a { color: #7dd3fc; }
-  </style>
-</head>
-<body>
-  <h1>Wrong device</h1>
-  <p>Open this link on the <strong>same browser</strong> where you requested the verification email, then try again.</p>
-  <p><a href="/">Return to worldhello.io</a></p>
-</body>
-</html>`;
-  return new NextResponse(html, {
-    status: 403,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+async function failRedirectForToken(req: NextRequest, nonce: string) {
+  const status = await magicTokenStatus(nonce);
+  if (status === "expired") return failRedirect(req, "expired");
+  return failRedirect(req, "used");
 }
 
 function escapeHtml(s: string): string {
