@@ -78,14 +78,36 @@ export async function executeMagicVerify(
     SELECT
       (SELECT COUNT(*)::int FROM consumed) AS consumed,
       (SELECT COUNT(*)::int FROM linked) AS linked,
-      (SELECT id FROM acc LIMIT 1) AS "accountId";
-  `)) as unknown as { rows: { consumed: number; linked: number; accountId: number | null }[] };
+      (SELECT id FROM acc LIMIT 1) AS "accountId",
+      (SELECT old_account_id FROM pre LIMIT 1) AS "oldAccountId";
+  `)) as unknown as {
+    rows: {
+      consumed: number;
+      linked: number;
+      accountId: number | null;
+      oldAccountId: number | null;
+    }[];
+  };
 
   const row = result.rows?.[0];
   if (!row || Number(row.consumed) === 0) return "token_invalid";
   if (row.accountId == null || Number(row.linked) === 0) {
     throw new Error("MAGIC_VERIFY_INCOMPLETE");
   }
+
+  // The device's prior account (e.g. a synthetic device-link account keyed by
+  // deviceAccountHash) just had all its nodes migrated onto the email account.
+  // Drop it if it's now empty so we don't leak orphaned account rows. Separate
+  // statement: a data-modifying CTE can't see the `linked` UPDATE's effect on the
+  // same snapshot, and the FK (nodes.account_id → accounts.id) is RESTRICT.
+  if (row.oldAccountId != null && row.oldAccountId !== row.accountId) {
+    await db.execute(sql`
+      DELETE FROM accounts a
+      WHERE a.id = ${row.oldAccountId}
+        AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.account_id = a.id);
+    `);
+  }
+
   return "ok";
 }
 
