@@ -10,9 +10,11 @@ export function shareUrl(code: string): string {
   return `${siteBaseUrl(clientOrigin())}/${code}`;
 }
 
+// Keep the bare host out of the blurb: social platforms auto-linkify a plain
+// domain into a clickable link with no referral code, which would let the
+// recipient join without the code and break the referral chain.
 export function shareBlurb(): string {
-  const host = siteHost(clientOrigin());
-  return `I just joined the chain on ${host} — see how far our connection travels 🌍`;
+  return `I just joined the chain — see how far our connection travels 🌍`;
 }
 
 export type Platform = "x" | "whatsapp" | "telegram" | "facebook" | "linkedin";
