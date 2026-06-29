@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { linkTokens } from "@/db/schema";
 import { newLinkCode } from "@/lib/codes";
+import { logApiError, logApiReject } from "@/lib/api-log";
 import { LINK_TTL_MS } from "@/lib/token";
 import { admitLinkCreate } from "@/lib/ratelimit";
 
@@ -13,11 +14,13 @@ const COOKIE = "wh_lid";
 export async function POST(req: NextRequest) {
   const localId = req.cookies.get(COOKIE)?.value;
   if (!localId) {
+    logApiReject("auth/link", "no_device", { hasCookie: false });
     return NextResponse.json({ error: "no_device" }, { status: 401 });
   }
 
   const verdict = await admitLinkCreate(localId);
   if (!verdict.ok) {
+    logApiReject("auth/link", "rate_limited", { reason: verdict.reason });
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
@@ -33,9 +36,10 @@ export async function POST(req: NextRequest) {
         expiresAt,
       });
       break;
-    } catch {
+    } catch (err) {
       code = newLinkCode();
       if (i === 3) {
+        logApiError("auth/link", "code insert failed after retries", err);
         return NextResponse.json({ error: "unavailable" }, { status: 503 });
       }
     }

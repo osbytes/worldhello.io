@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyNonce } from "@/lib/token";
+import { logApiReject } from "@/lib/api-log";
 import { executeMagicVerify, magicTokenStatus } from "@/lib/magic-verify";
 import type { VerifyFailureReason } from "@/lib/verify-feedback";
 
@@ -15,9 +16,13 @@ const COOKIE = "wh_lid";
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
   const nonce = token ? verifyNonce(token) : null;
-  if (!nonce) return failRedirect(req, "invalid");
+  if (!nonce) {
+    logApiReject("auth/verify", "invalid", { phase: "get", hasToken: !!token });
+    return failRedirect(req, "invalid");
+  }
   const status = await magicTokenStatus(nonce);
   if (status !== "valid") {
+    logApiReject("auth/verify", status === "expired" ? "expired" : "used", { phase: "get" });
     return failRedirect(req, status === "expired" ? "expired" : "used");
   }
 
@@ -64,8 +69,14 @@ export async function POST(req: NextRequest) {
 
   const nonce = token ? verifyNonce(token) : null;
   const deviceLocalId = req.cookies.get(COOKIE)?.value;
-  if (!nonce) return failRedirect(req, "invalid");
-  if (!deviceLocalId) return failRedirect(req, "no_session");
+  if (!nonce) {
+    logApiReject("auth/verify", "invalid", { phase: "post", hasToken: !!token });
+    return failRedirect(req, "invalid");
+  }
+  if (!deviceLocalId) {
+    logApiReject("auth/verify", "no_session", { phase: "post" });
+    return failRedirect(req, "no_session");
+  }
 
   try {
     const result = await executeMagicVerify(nonce, deviceLocalId);
@@ -73,6 +84,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL("/?verified=1", req.nextUrl.origin));
     }
     if (result === "device_mismatch") {
+      logApiReject("auth/verify", "wrong_device", { phase: "post" });
       return failRedirect(req, "wrong_device");
     }
     if (result === "token_invalid") {
@@ -83,6 +95,7 @@ export async function POST(req: NextRequest) {
     return failRedirect(req, "error");
   }
 
+  logApiReject("auth/verify", "error", { phase: "post", detail: "unexpected_result" });
   return failRedirect(req, "error");
 }
 
@@ -92,6 +105,8 @@ function failRedirect(req: NextRequest, reason: VerifyFailureReason) {
 
 async function failRedirectForToken(req: NextRequest, nonce: string) {
   const status = await magicTokenStatus(nonce);
+  const reason = status === "expired" ? "expired" : "used";
+  logApiReject("auth/verify", reason, { phase: "post", tokenStatus: status });
   if (status === "expired") return failRedirect(req, "expired");
   return failRedirect(req, "used");
 }

@@ -5,6 +5,7 @@ import { magicTokens } from "@/db/schema";
 import { newNonce, signNonce, MAGIC_TTL_MS } from "@/lib/token";
 import { emailHash, hashKeyed } from "@/lib/crypto";
 import { sendMail } from "@/lib/mailer";
+import { logApiReject } from "@/lib/api-log";
 import { admitMagic } from "@/lib/ratelimit";
 import { clientIp } from "@/lib/geo";
 
@@ -26,7 +27,9 @@ export async function POST(req: NextRequest) {
     const ipHash = hashKeyed(clientIp(req.headers));
 
     const verdict = await admitMagic(ipHash, hashed);
-    if (verdict.ok) {
+    if (!verdict.ok) {
+      logApiReject("auth/magic", "skipped", { reason: verdict.reason });
+    } else {
       const nonce = newNonce();
       const token = signNonce(nonce);
       const expiresAt = new Date(Date.now() + MAGIC_TTL_MS);
@@ -49,6 +52,11 @@ export async function POST(req: NextRequest) {
         console.error("[auth/magic] send failed:", err);
       });
     }
+  } else {
+    logApiReject("auth/magic", "skipped", {
+      bodyValid: parsed.success,
+      hasCookie: !!localId,
+    });
   }
 
   const elapsed = Date.now() - started;

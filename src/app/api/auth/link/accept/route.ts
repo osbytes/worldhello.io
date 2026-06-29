@@ -3,6 +3,7 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { linkDevices } from "@/lib/account-link";
+import { logApiReject, zodIssueSummary } from "@/lib/api-log";
 import { admitLinkAccept } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -22,11 +23,17 @@ export async function POST(req: NextRequest) {
   const targetLocalId = req.cookies.get(COOKIE)?.value;
 
   if (!parsed.success || !targetLocalId) {
+    logApiReject("auth/link/accept", "bad_request", {
+      bodyValid: parsed.success,
+      hasCookie: !!targetLocalId,
+      ...(parsed.success ? {} : zodIssueSummary(parsed.error.issues)),
+    });
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
   const verdict = await admitLinkAccept(targetLocalId);
   if (!verdict.ok) {
+    logApiReject("auth/link/accept", "rate_limited", { reason: verdict.reason });
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
@@ -39,6 +46,7 @@ export async function POST(req: NextRequest) {
 
   const row = consumed.rows?.[0];
   if (!row) {
+    logApiReject("auth/link/accept", "invalid_code", { codeLen: code.length });
     return NextResponse.json({ error: "invalid_code" }, { status: 400 });
   }
 
@@ -46,6 +54,10 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     const status =
       result.reason === "same_device" ? 409 : result.reason === "target_missing" ? 404 : 400;
+    logApiReject("auth/link/accept", result.reason, {
+      sourcePresent: result.reason !== "source_missing",
+      targetPresent: result.reason !== "target_missing",
+    });
     return NextResponse.json({ error: result.reason }, { status });
   }
 
