@@ -19,6 +19,14 @@ export type DeviceLinkStatus = {
   siblingCount: number;
 };
 
+/** True when this email has completed magic-link verification (any device). */
+export async function emailHashVerified(hashed: string): Promise<boolean> {
+  const r = (await db.execute(sql`
+    SELECT 1 FROM accounts WHERE email_hash = ${hashed} LIMIT 1;
+  `)) as unknown as { rows: unknown[] };
+  return !!r.rows?.[0];
+}
+
 /** Email verification + device link status for the current device. */
 export async function deviceLinkStatus(localId: string): Promise<DeviceLinkStatus | null> {
   const r = (await db.execute(sql`

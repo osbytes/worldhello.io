@@ -9,6 +9,7 @@ import { logApiReject } from "@/lib/api-log";
 import { admitMagic } from "@/lib/ratelimit";
 import { clientIp } from "@/lib/geo";
 import { siteBaseUrl, siteHost } from "@/lib/site";
+import { emailHashVerified } from "@/lib/account-link";
 
 export const runtime = "nodejs";
 
@@ -27,32 +28,36 @@ export async function POST(req: NextRequest) {
     const hashed = emailHash(email);
     const ipHash = hashKeyed(clientIp(req.headers));
 
-    const verdict = await admitMagic(ipHash, hashed);
-    if (!verdict.ok) {
-      logApiReject("auth/magic", "skipped", { reason: verdict.reason });
+    if (await emailHashVerified(hashed)) {
+      logApiReject("auth/magic", "skipped", { reason: "already_verified" });
     } else {
-      const nonce = newNonce();
-      const token = signNonce(nonce);
-      const expiresAt = new Date(Date.now() + MAGIC_TTL_MS);
+      const verdict = await admitMagic(ipHash, hashed);
+      if (!verdict.ok) {
+        logApiReject("auth/magic", "skipped", { reason: verdict.reason });
+      } else {
+        const nonce = newNonce();
+        const token = signNonce(nonce);
+        const expiresAt = new Date(Date.now() + MAGIC_TTL_MS);
 
-      await db.insert(magicTokens).values({
-        nonce,
-        emailHash: hashed,
-        localId,
-        expiresAt,
-      });
+        await db.insert(magicTokens).values({
+          nonce,
+          emailHash: hashed,
+          localId,
+          expiresAt,
+        });
 
-      const base = siteBaseUrl(req.nextUrl.origin);
-      const host = siteHost(req.nextUrl.origin);
-      const link = `${base}/api/auth/verify?token=${encodeURIComponent(token)}`;
+        const base = siteBaseUrl(req.nextUrl.origin);
+        const host = siteHost(req.nextUrl.origin);
+        const link = `${base}/api/auth/verify?token=${encodeURIComponent(token)}`;
 
-      await sendMail({
-        to: email,
-        subject: `Verify your ${host} account`,
-        html: `<p>Click below to verify your account on ${host}:</p><p><a href="${link}">Verify my account</a></p><p>Confirm on the same device that requested this email. Linked devices stay connected. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
-      }).catch((err) => {
-        console.error("[auth/magic] send failed:", err);
-      });
+        await sendMail({
+          to: email,
+          subject: `Verify your ${host} account`,
+          html: `<p>Click below to verify your account on ${host}:</p><p><a href="${link}">Verify my account</a></p><p>Confirm on the same device that requested this email. Linked devices stay connected. Expires in 30 minutes. If you didn't request this, ignore it.</p>`,
+        }).catch((err) => {
+          console.error("[auth/magic] send failed:", err);
+        });
+      }
     }
   } else {
     logApiReject("auth/magic", "skipped", {
