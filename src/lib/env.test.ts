@@ -16,8 +16,8 @@ describe("env", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("SKIP_ENV_VALIDATION", "");
     vi.stubEnv("DATABASE_URL", "");
-    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
-    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
     vi.stubEnv("APP_SECRET", "");
     vi.stubEnv("RESEND_API_KEY", "");
     vi.stubEnv("SMTP_HOST", "");
@@ -30,8 +30,8 @@ describe("env", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("SKIP_ENV_VALIDATION", "");
     vi.stubEnv("DATABASE_URL", "postgres://localhost/test");
-    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
-    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "token");
+    vi.stubEnv("KV_REST_API_URL", "https://example.upstash.io");
+    vi.stubEnv("KV_REST_API_TOKEN", "token");
     vi.stubEnv("APP_SECRET", "test-secret-32-chars-minimum!!!!");
     vi.stubEnv("RESEND_API_KEY", "re_test");
     vi.stubEnv("NEXT_PUBLIC_BASE_URL", "https://worldhello.io");

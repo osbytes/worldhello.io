@@ -5,7 +5,7 @@ export function isProduction(): boolean {
 }
 
 export function hasRedis(): boolean {
-  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
 export function hasEmailProvider(): boolean {
@@ -21,7 +21,7 @@ export function validateProductionEnv(): void {
 
   const missing: string[] = [];
   if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
-  if (!hasRedis()) missing.push("UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN");
+  if (!hasRedis()) missing.push("KV_REST_API_URL + KV_REST_API_TOKEN");
   if (!process.env.APP_SECRET) missing.push("APP_SECRET");
   if (!hasEmailProvider()) missing.push("RESEND_API_KEY or SMTP_HOST");
   if (!process.env.NEXT_PUBLIC_BASE_URL) missing.push("NEXT_PUBLIC_BASE_URL");
