@@ -78,8 +78,9 @@ export async function unlinkDevice(localId: string): Promise<UnlinkDeviceResult>
 }
 
 /**
- * Merge two device nodes under one account (DESIGN §5.5).
- * Does not email-verify — only syncs stats/globe across devices. Unlink reverts this device.
+ * Merge two device groups under the source account (DESIGN §5.5).
+ * The accepting device's whole prior group moves together; only `account_id` changes
+ * so unlink can still detach one device back to its own per-node stats.
  */
 export async function linkDevices(
   sourceLocalId: string,
@@ -89,14 +90,16 @@ export async function linkDevices(
     return { ok: false, reason: "same_device" };
   }
 
-  const source = (await db.execute(sql`
-    SELECT id, account_id AS "accountId"
+  const nodes = (await db.execute(sql`
+    SELECT local_id AS "localId", account_id AS "accountId"
     FROM nodes
-    WHERE local_id = ${sourceLocalId};
-  `)) as unknown as { rows: { id: number; accountId: number | null }[] };
+    WHERE local_id IN (${sourceLocalId}, ${targetLocalId});
+  `)) as unknown as { rows: { localId: string; accountId: number | null }[] };
 
-  const srcNode = source.rows?.[0];
+  const srcNode = nodes.rows?.find((n) => n.localId === sourceLocalId);
+  const tgtNode = nodes.rows?.find((n) => n.localId === targetLocalId);
   if (!srcNode) return { ok: false, reason: "source_missing" };
+  if (!tgtNode) return { ok: false, reason: "target_missing" };
 
   let accountId = srcNode.accountId;
 
@@ -116,13 +119,25 @@ export async function linkDevices(
     `);
   }
 
-  const target = (await db.execute(sql`
-    UPDATE nodes SET account_id = ${accountId}, ephemeral = false
-    WHERE local_id = ${targetLocalId}
-    RETURNING id;
-  `)) as unknown as { rows: { id: number }[] };
+  const targetOldAccountId = tgtNode.accountId;
+  if (targetOldAccountId === accountId) {
+    await db.execute(sql`
+      UPDATE nodes SET ephemeral = false WHERE local_id = ${targetLocalId};
+    `);
+    return { ok: true, accountId };
+  }
 
-  if (!target.rows?.[0]) return { ok: false, reason: "target_missing" };
+  if (targetOldAccountId != null) {
+    await db.execute(sql`
+      UPDATE nodes SET account_id = ${accountId}, ephemeral = false
+      WHERE account_id = ${targetOldAccountId};
+    `);
+  } else {
+    await db.execute(sql`
+      UPDATE nodes SET account_id = ${accountId}, ephemeral = false
+      WHERE local_id = ${targetLocalId};
+    `);
+  }
 
   return { ok: true, accountId };
 }

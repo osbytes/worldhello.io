@@ -1,7 +1,7 @@
 /** Read-side queries: leaderboard, globe points, referrer card. DESIGN §5/§3. */
 import { sql } from "drizzle-orm";
 import { db } from "./index";
-import { metricsForNode, rankForNodeId, globeOverlayForNode } from "./graph";
+import { metricsForNode, rankForNodeId, globeOverlayForNode, linkedAccountLeaderRows, soloLeaderRows } from "./graph";
 import {
   GLOBE_RAW_NODE_THRESHOLD,
   GLOBE_RAW_POINT_LIMIT,
@@ -19,42 +19,46 @@ export type LeaderRow = {
   country: string | null;
 };
 
-/** Top-N by reach. Reads cached_metrics (indexed). Human nodes only. */
+/** Top-N by effective reach — one row per identity (solo node or linked account union). */
 export async function leaderboard(limit = 20): Promise<LeaderRow[]> {
-  const r = (await db.execute(sql`
-    SELECT n.code, m.reach, m.max_depth AS "maxDepth", m.countries, n.verified, n.country
-    FROM cached_metrics m
-    JOIN nodes n ON n.id = m.node_id
-    WHERE n.class = 'human'
-    ORDER BY m.reach DESC, n.verified DESC
-    LIMIT ${limit};
-  `)) as unknown as { rows: LeaderRow[] };
-  return r.rows ?? [];
+  const [linked, solo] = await Promise.all([linkedAccountLeaderRows(), soloLeaderRows()]);
+  const rows = [...linked, ...solo]
+    .sort((a, b) => b.reach - a.reach || Number(b.verified) - Number(a.verified))
+    .slice(0, limit);
+  return rows;
 }
 
 /** A referrer's public card (the hook on ?ref landing). */
 export async function referrerCard(code: string) {
-  const r = (await db.execute(sql`
-    SELECT n.code, n.country, n.lat, n.lng, n.verified,
-           COALESCE(m.reach,0) AS reach,
-           COALESCE(m.max_depth,0) AS "maxDepth",
-           COALESCE(m.countries,0) AS countries
-    FROM nodes n LEFT JOIN cached_metrics m ON m.node_id = n.id
-    WHERE n.code = ${code} AND n.class = 'human'
+  const nodeR = (await db.execute(sql`
+    SELECT id, code, country, lat, lng, verified
+    FROM nodes
+    WHERE code = ${code} AND class = 'human'
     LIMIT 1;
   `)) as unknown as {
     rows: {
+      id: number;
       code: string;
       country: string | null;
       lat: number | null;
       lng: number | null;
       verified: boolean;
-      reach: number;
-      maxDepth: number;
-      countries: number;
     }[];
   };
-  return r.rows?.[0] ?? null;
+  const node = nodeR.rows?.[0];
+  if (!node) return null;
+
+  const metrics = await metricsForNode(node.id);
+  return {
+    code: node.code,
+    country: node.country,
+    lat: node.lat,
+    lng: node.lng,
+    verified: node.verified,
+    reach: metrics.reach,
+    maxDepth: metrics.maxDepth,
+    countries: metrics.countries,
+  };
 }
 
 export type GlobePoint = { lat: number; lng: number; v: 0 | 1; n?: number };
@@ -203,7 +207,7 @@ export async function meDetail(code: string): Promise<{
 /**
  * Bundle for /api/me: globe overlay + metrics + rank.
  * Unlinked devices read denormalized cached_metrics; multi-device accounts use live union.
- * Rank always uses this node's cached reach (consistent with leaderboard).
+ * Rank uses the same effective reach as metrics (account-union when linked).
  */
 export async function meBundle(code: string): Promise<{
   you: { lat: number; lng: number } | null;
@@ -241,20 +245,9 @@ export async function meBundle(code: string): Promise<{
 /** Global rank + percentile for a node (anti-hopeless, DESIGN §2 leaderboard). */
 export async function rankOf(code: string): Promise<{ rank: number; percentile: number } | null> {
   const r = (await db.execute(sql`
-    WITH me AS (
-      SELECT m.reach FROM cached_metrics m JOIN nodes n ON n.id = m.node_id WHERE n.code = ${code}
-    ),
-    counts AS (
-      SELECT
-        (SELECT COUNT(*) FROM cached_metrics m JOIN nodes n ON n.id=m.node_id
-           WHERE n.class='human' AND m.reach > (SELECT reach FROM me)) AS above,
-        (SELECT COUNT(*) FROM nodes WHERE class='human') AS total
-    )
-    SELECT above + 1 AS rank, total FROM counts;
-  `)) as unknown as { rows: { rank: number; total: number }[] };
-  const row = r.rows?.[0];
-  if (!row) return null;
-  const total = Number(row.total) || 1;
-  const rank = Number(row.rank);
-  return { rank, percentile: Math.round((1 - rank / total) * 100) };
+    SELECT id FROM nodes WHERE code = ${code} LIMIT 1;
+  `)) as unknown as { rows: { id: number }[] };
+  const node = r.rows?.[0];
+  if (!node) return null;
+  return rankForNodeId(node.id);
 }

@@ -284,30 +284,175 @@ export async function metricsForNode(nodeId: number): Promise<Metrics> {
   return subtreeMetrics(nodeId);
 }
 
-/** Rank from this node's cached reach (consistent with leaderboard). */
+/** Rank from effective reach (account-union when linked, else cached per-node). */
 export async function rankForNodeId(
   nodeId: number,
 ): Promise<{ rank: number; percentile: number } | null> {
-  const cached = await cachedMetricsForNode(nodeId);
-  if (!cached) return null;
-  return rankForReach(cached.reach);
+  const metrics = await metricsForNode(nodeId);
+  return rankForReach(metrics.reach);
 }
 
-/** Leaderboard rank for a reach score. */
+/**
+ * Rank a reach score against all identities: solo nodes use cached reach;
+ * multi-device accounts use one union reach (DESIGN §5.5).
+ */
 export async function rankForReach(
   reach: number,
 ): Promise<{ rank: number; percentile: number } | null> {
   const r = (await db.execute(sql`
+    WITH linked AS (
+      SELECT account_id
+      FROM nodes
+      WHERE account_id IS NOT NULL AND class = 'human'
+      GROUP BY account_id
+      HAVING COUNT(*) > 1
+    ),
+    account_nodes AS (
+      SELECT n.account_id, n.id, n.path, n.depth
+      FROM nodes n
+      INNER JOIN linked l ON l.account_id = n.account_id
+      WHERE n.class = 'human'
+    ),
+    union_nodes AS (
+      SELECT DISTINCT an.account_id, n.id, n.depth
+      FROM account_nodes an
+      INNER JOIN nodes n ON n.path <@ an.path AND n.class = 'human'
+    ),
+    device_ids AS (
+      SELECT account_id, id FROM account_nodes
+    ),
+    min_depth AS (
+      SELECT account_id, MIN(depth) AS d FROM account_nodes GROUP BY account_id
+    ),
+    account_scores AS (
+      SELECT
+        u.account_id,
+        COUNT(*) FILTER (WHERE NOT EXISTS (
+          SELECT 1 FROM device_ids d
+          WHERE d.account_id = u.account_id AND d.id = u.id
+        ))::int AS reach
+      FROM union_nodes u
+      GROUP BY u.account_id
+    ),
+    solo_scores AS (
+      SELECT m.reach::int AS reach
+      FROM cached_metrics m
+      INNER JOIN nodes n ON n.id = m.node_id
+      WHERE n.class = 'human'
+        AND (
+          n.account_id IS NULL
+          OR n.account_id NOT IN (SELECT account_id FROM linked)
+        )
+    ),
+    all_scores AS (
+      SELECT reach FROM solo_scores
+      UNION ALL
+      SELECT reach FROM account_scores
+    )
     SELECT
-      (SELECT COUNT(*) FROM cached_metrics m JOIN nodes n ON n.id = m.node_id
-         WHERE n.class = 'human' AND m.reach > ${reach}) + 1 AS rank,
-      (SELECT COUNT(*) FROM nodes WHERE class = 'human') AS total;
+      (SELECT COUNT(*)::int FROM all_scores WHERE reach > ${reach}) + 1 AS rank,
+      (SELECT COUNT(*)::int FROM all_scores) AS total;
   `)) as unknown as { rows: { rank: number; total: number }[] };
   const row = r.rows?.[0];
   if (!row) return null;
   const total = Number(row.total) || 1;
   const rank = Number(row.rank);
   return { rank, percentile: Math.round((1 - rank / total) * 100) };
+}
+
+export type LeaderIdentityRow = {
+  code: string;
+  reach: number;
+  maxDepth: number;
+  countries: number;
+  verified: boolean;
+  country: string | null;
+};
+
+/** One leaderboard row per multi-device account (union reach + representative node). */
+export async function linkedAccountLeaderRows(): Promise<LeaderIdentityRow[]> {
+  const r = (await db.execute(sql`
+    WITH linked AS (
+      SELECT account_id
+      FROM nodes
+      WHERE account_id IS NOT NULL AND class = 'human'
+      GROUP BY account_id
+      HAVING COUNT(*) > 1
+    ),
+    account_nodes AS (
+      SELECT n.account_id, n.id, n.path, n.depth
+      FROM nodes n
+      INNER JOIN linked l ON l.account_id = n.account_id
+      WHERE n.class = 'human'
+    ),
+    union_nodes AS (
+      SELECT DISTINCT an.account_id, n.id, n.country, n.depth
+      FROM account_nodes an
+      INNER JOIN nodes n ON n.path <@ an.path AND n.class = 'human'
+    ),
+    device_ids AS (
+      SELECT account_id, id FROM account_nodes
+    ),
+    min_depth AS (
+      SELECT account_id, MIN(depth) AS d FROM account_nodes GROUP BY account_id
+    ),
+    agg AS (
+      SELECT
+        u.account_id,
+        COUNT(*) FILTER (WHERE NOT EXISTS (
+          SELECT 1 FROM device_ids d
+          WHERE d.account_id = u.account_id AND d.id = u.id
+        ))::int AS reach,
+        COALESCE(MAX(u.depth) - md.d, 0)::int AS "maxDepth",
+        COUNT(DISTINCT u.country) FILTER (WHERE u.country IS NOT NULL)::int AS countries
+      FROM union_nodes u
+      INNER JOIN min_depth md ON md.account_id = u.account_id
+      GROUP BY u.account_id, md.d
+    ),
+    rep AS (
+      SELECT DISTINCT ON (account_id)
+        account_id AS "accountId", code, verified, country
+      FROM nodes
+      WHERE account_id IN (SELECT account_id FROM linked) AND class = 'human'
+      ORDER BY account_id, verified DESC, id ASC
+    )
+    SELECT rep.code, a.reach, a."maxDepth", a.countries, rep.verified, rep.country
+    FROM agg a
+    INNER JOIN rep ON rep."accountId" = a.account_id;
+  `)) as unknown as { rows: LeaderIdentityRow[] };
+  return (r.rows ?? []).map((row) => ({
+    code: row.code,
+    reach: Number(row.reach ?? 0),
+    maxDepth: Number(row.maxDepth ?? 0),
+    countries: Number(row.countries ?? 0),
+    verified: row.verified,
+    country: row.country,
+  }));
+}
+
+/** Leaderboard rows for solo devices (no linked siblings on the account). */
+export async function soloLeaderRows(): Promise<LeaderIdentityRow[]> {
+  const r = (await db.execute(sql`
+    SELECT n.code, m.reach, m.max_depth AS "maxDepth", m.countries, n.verified, n.country
+    FROM cached_metrics m
+    INNER JOIN nodes n ON n.id = m.node_id
+    WHERE n.class = 'human'
+      AND (
+        n.account_id IS NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM nodes n2
+          WHERE n2.account_id = n.account_id AND n2.id <> n.id AND n2.class = 'human'
+        )
+      );
+  `)) as unknown as { rows: LeaderIdentityRow[] };
+  return (r.rows ?? []).map((row) => ({
+    code: row.code,
+    reach: Number(row.reach ?? 0),
+    maxDepth: Number(row.maxDepth ?? 0),
+    countries: Number(row.countries ?? 0),
+    verified: row.verified,
+    country: row.country,
+  }));
 }
 
 export type GlobeOverlay = {
