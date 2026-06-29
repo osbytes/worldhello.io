@@ -14,6 +14,7 @@ describe("env", () => {
 
   it("throws in production when required vars are missing", () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SKIP_ENV_VALIDATION", "");
     vi.stubEnv("DATABASE_URL", "");
     vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
@@ -27,6 +28,7 @@ describe("env", () => {
 
   it("passes when all production vars are set", () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SKIP_ENV_VALIDATION", "");
     vi.stubEnv("DATABASE_URL", "postgres://localhost/test");
     vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "token");
