@@ -9,7 +9,7 @@ import { logApiReject } from "@/lib/api-log";
 import { admitMagic } from "@/lib/ratelimit";
 import { clientIp } from "@/lib/geo";
 import { siteBaseUrl, siteHost } from "@/lib/site";
-import { emailHashVerified } from "@/lib/account-link";
+import { deviceEmailVerified, pendingMagicToken } from "@/lib/account-link";
 
 export const runtime = "nodejs";
 
@@ -28,8 +28,10 @@ export async function POST(req: NextRequest) {
     const hashed = emailHash(email);
     const ipHash = hashKeyed(clientIp(req.headers));
 
-    if (await emailHashVerified(hashed)) {
-      logApiReject("auth/magic", "skipped", { reason: "already_verified" });
+    if (await deviceEmailVerified(localId, hashed)) {
+      logApiReject("auth/magic", "skipped", { reason: "already_verified_on_device" });
+    } else if (await pendingMagicToken(localId, hashed)) {
+      logApiReject("auth/magic", "skipped", { reason: "pending_token" });
     } else {
       const verdict = await admitMagic(ipHash, hashed);
       if (!verdict.ok) {

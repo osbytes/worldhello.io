@@ -19,10 +19,31 @@ export type DeviceLinkStatus = {
   siblingCount: number;
 };
 
-/** True when this email has completed magic-link verification (any device). */
-export async function emailHashVerified(hashed: string): Promise<boolean> {
+/** True when this device already completed magic-link verify for this email. */
+export async function deviceEmailVerified(
+  localId: string,
+  hashed: string,
+): Promise<boolean> {
   const r = (await db.execute(sql`
-    SELECT 1 FROM accounts WHERE email_hash = ${hashed} LIMIT 1;
+    SELECT 1
+    FROM nodes n
+    INNER JOIN accounts a ON a.id = n.account_id
+    WHERE n.local_id = ${localId}
+      AND a.email_hash = ${hashed}
+      AND n.verified = true
+    LIMIT 1;
+  `)) as unknown as { rows: unknown[] };
+  return !!r.rows?.[0];
+}
+
+/** True when an unexpired magic token already exists for this device + email pair. */
+export async function pendingMagicToken(localId: string, hashed: string): Promise<boolean> {
+  const r = (await db.execute(sql`
+    SELECT 1 FROM magic_tokens
+    WHERE local_id = ${localId}
+      AND email_hash = ${hashed}
+      AND expires_at > now()
+    LIMIT 1;
   `)) as unknown as { rows: unknown[] };
   return !!r.rows?.[0];
 }
