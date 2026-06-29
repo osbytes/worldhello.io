@@ -124,25 +124,44 @@ export async function bumpAncestors(
   `);
 }
 
+type ResolvedNode = { id: number; code: string; referrerId: number | null; localId: string };
+
 /** Resolve an existing node by localId (primary) then fingerprint (fallback). */
 export async function resolveNode(
   localId: string,
   fingerprint: string | null,
-): Promise<{ id: number; code: string; referrerId: number | null } | null> {
+): Promise<ResolvedNode | null> {
   const byLocal = (await db.execute(sql`
-    SELECT id, code, referrer_id AS "referrerId" FROM nodes WHERE local_id = ${localId} LIMIT 1;
-  `)) as unknown as { rows: { id: number; code: string; referrerId: number | null }[] };
+    SELECT id, code, referrer_id AS "referrerId", local_id AS "localId"
+    FROM nodes WHERE local_id = ${localId} LIMIT 1;
+  `)) as unknown as { rows: ResolvedNode[] };
   if (byLocal.rows?.[0]) return byLocal.rows[0];
 
   if (fingerprint) {
     const byFp = (await db.execute(sql`
-      SELECT id, code, referrer_id AS "referrerId" FROM nodes
+      SELECT id, code, referrer_id AS "referrerId", local_id AS "localId"
+      FROM nodes
       WHERE fingerprint = ${fingerprint} AND class = 'human'
       ORDER BY created_at ASC LIMIT 1;
-    `)) as unknown as { rows: { id: number; code: string; referrerId: number | null }[] };
+    `)) as unknown as { rows: ResolvedNode[] };
     if (byFp.rows?.[0]) return byFp.rows[0];
   }
   return null;
+}
+
+/**
+ * Move a node onto a freshly issued client localId (DESIGN §2 fingerprint re-link).
+ * Cookie and DB must agree so auth routes can resolve the node by wh_lid alone.
+ */
+export async function relinkNodeLocalId(nodeId: number, newLocalId: string): Promise<boolean> {
+  const updated = (await db.execute(sql`
+    UPDATE nodes SET local_id = ${newLocalId}
+    WHERE id = ${nodeId}
+      AND local_id <> ${newLocalId}
+      AND NOT EXISTS (SELECT 1 FROM nodes WHERE local_id = ${newLocalId})
+    RETURNING id;
+  `)) as unknown as { rows: { id: number }[] };
+  return !!updated.rows?.[0];
 }
 
 /** Look up a node id by its share code (the ?ref target). */

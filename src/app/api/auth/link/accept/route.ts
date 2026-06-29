@@ -38,6 +38,31 @@ export async function POST(req: NextRequest) {
   }
 
   const code = parsed.data.code;
+
+  const pending = (await db.execute(sql`
+    SELECT source_local_id AS "sourceLocalId"
+    FROM link_tokens
+    WHERE code = ${code} AND expires_at > now()
+    LIMIT 1;
+  `)) as unknown as { rows: { sourceLocalId: string }[] };
+
+  const pendingRow = pending.rows?.[0];
+  if (!pendingRow) {
+    logApiReject("auth/link/accept", "invalid_code", { codeLen: code.length });
+    return NextResponse.json({ error: "invalid_code" }, { status: 400 });
+  }
+
+  const sourceExists = (await db.execute(sql`
+    SELECT 1 FROM nodes WHERE local_id = ${pendingRow.sourceLocalId} LIMIT 1;
+  `)) as unknown as { rows: unknown[] };
+  if (!sourceExists.rows?.[0]) {
+    logApiReject("auth/link/accept", "source_missing", {
+      sourcePresent: false,
+      targetPresent: true,
+    });
+    return NextResponse.json({ error: "source_missing" }, { status: 400 });
+  }
+
   const consumed = (await db.execute(sql`
     DELETE FROM link_tokens
     WHERE code = ${code} AND expires_at > now()

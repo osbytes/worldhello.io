@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { linkTokens } from "@/db/schema";
 import { newLinkCode } from "@/lib/codes";
@@ -22,6 +23,14 @@ export async function POST(req: NextRequest) {
   if (!verdict.ok) {
     logApiReject("auth/link", "rate_limited", { reason: verdict.reason });
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
+  const registered = (await db.execute(sql`
+    SELECT 1 FROM nodes WHERE local_id = ${localId} LIMIT 1;
+  `)) as unknown as { rows: unknown[] };
+  if (!registered.rows?.[0]) {
+    logApiReject("auth/link", "not_registered", { hasCookie: true });
+    return NextResponse.json({ error: "not_registered" }, { status: 403 });
   }
 
   const expiresAt = new Date(Date.now() + LINK_TTL_MS);

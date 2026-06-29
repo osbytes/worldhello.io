@@ -5,6 +5,7 @@ import { nodeSignals } from "@/db/schema";
 import {
   createNode,
   resolveNode,
+  relinkNodeLocalId,
   nodeByCode,
   metricsForNode,
   bumpAncestors,
@@ -79,6 +80,9 @@ export async function POST(req: NextRequest) {
   // ── Existing identity? localId → fingerprint fallback. No new node, no re-parent. ──
   const existing = await resolveNode(localId, fpHash);
   if (existing) {
+    if (existing.localId !== localId) {
+      await relinkNodeLocalId(existing.id, localId);
+    }
     const metrics = await metricsForNode(existing.id);
     const res = NextResponse.json({
       code: existing.code,
@@ -124,6 +128,9 @@ export async function POST(req: NextRequest) {
     // unique(local_id) race → treat as existing
     const retry = await resolveNode(localId, fpHash);
     if (retry) {
+      if (retry.localId !== localId) {
+        await relinkNodeLocalId(retry.id, localId);
+      }
       const metrics = await metricsForNode(retry.id);
       const res = NextResponse.json({ code: retry.code, isNew: false, metrics });
       setCookie(res, localId);
