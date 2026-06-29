@@ -5,15 +5,14 @@
  * trigger step-up challenges or leaderboard dampening (not a hard block here).
  */
 export type RiskInput = {
-  class: string; // from classify
+  baseRisk: number; // from resolveClass detector tier
   ephemeral: boolean; // incognito
   hasFingerprint: boolean;
   ipShared: boolean; // many distinct localIds on this IP recently (good signal!)
 };
 
 export function riskScore(i: RiskInput): number {
-  let s = 0;
-  if (i.class !== "human") s += 70;
+  let s = i.baseRisk;
   if (!i.hasFingerprint) s += 20;
   if (i.ephemeral) s += 10;
   // Shared IP with HIGH localId diversity = a crowd, LOWERS risk (DESIGN §6.6).

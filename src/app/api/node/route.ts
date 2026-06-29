@@ -12,7 +12,7 @@ import {
   type CreatedNode,
 } from "@/db/graph";
 import { newCode } from "@/lib/codes";
-import { classify, isHuman } from "@/lib/classify";
+import { isHuman, resolveClass } from "@/lib/classify";
 import { geoFromHeaders, clientIp } from "@/lib/geo";
 import { hashKeyed } from "@/lib/crypto";
 import { logApiError, logApiReject, zodIssueSummary } from "@/lib/api-log";
@@ -28,6 +28,7 @@ const Body = z.object({
   ref: z.string().min(4).max(16).optional(), // referrer share code
   incognito: z.boolean().optional(),
   botd: z.boolean().optional(), // @fingerprintjs/botd client verdict
+  privacyBrowser: z.boolean().optional(), // Brave etc. — softens lone BotID false positives
   referer: z.string().max(512).optional(), // document.referrer (client-observed)
   src: z.string().max(64).optional(), // share-channel tag from ?src=
 });
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "identity_mismatch" }, { status: 403 });
   }
 
-  const { localId, fingerprint, ref, incognito, botd, src } = parsed.data;
+  const { localId, fingerprint, ref, incognito, botd, privacyBrowser, src } = parsed.data;
 
   const h = req.headers;
   const ua = h.get("user-agent");
@@ -66,8 +67,13 @@ export async function POST(req: NextRequest) {
       /* detector unavailable — fall through to UA/botd */
     }
   }
-  const nodeClass = classify({ ua, botdDetected: botd, botIdIsBot });
   const fpHash = fingerprint ? hashKeyed(fingerprint) : null;
+  const ephemeral = !!incognito;
+  const classified = resolveClass(
+    { ua, botdDetected: botd, botIdIsBot },
+    { hasFingerprint: !!fpHash, ephemeral, privacyBrowser: !!privacyBrowser },
+  );
+  const nodeClass = classified.class;
   const ipHash = hashKeyed(clientIp(h));
 
   // ── Resolve referrer code → id (write-once edge source). ──
@@ -103,7 +109,6 @@ export async function POST(req: NextRequest) {
   }
 
   const geo = geoFromHeaders(h);
-  const ephemeral = !!incognito;
 
   // ── Create node (single-statement ltree path + depth + cycle/depth guard). ──
   let created: CreatedNode;
@@ -149,11 +154,12 @@ export async function POST(req: NextRequest) {
     fingerprint: fpHash,
     ipHash,
     ua: ua ?? null,
+    botidVerdict: classified.verdict,
     incognitoGuess: ephemeral,
     referer: refererHost(referer), // origin only — never store full URL/query (privacy)
     src: src ?? null,
     riskScore: riskScore({
-      class: nodeClass,
+      baseRisk: classified.baseRisk,
       ephemeral,
       hasFingerprint: !!fpHash,
       ipShared: false,

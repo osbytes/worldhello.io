@@ -92,6 +92,18 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   ]);
 }
 
+/** Brave and similar browsers farble fingerprint APIs — report for server soft overrides. */
+export function detectPrivacyBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { brave?: { isBrave?: () => boolean } };
+  try {
+    if (nav.brave?.isBrave?.()) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 let botdPromise: Promise<boolean> | null = null;
 /** @fingerprintjs/botd headless/automation detection (client signal). */
 async function detectBot(): Promise<boolean> {
@@ -141,6 +153,7 @@ export async function registerNode(ref: string | null): Promise<NodeResponse | n
     ref: ref && ref.length >= 4 ? ref : undefined,
     incognito,
     botd,
+    privacyBrowser: detectPrivacyBrowser() || undefined,
     referer,
     src: src && src.length > 0 ? src : undefined,
   };
