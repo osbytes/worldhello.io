@@ -1,6 +1,7 @@
 /** Read-side queries: leaderboard, globe points, referrer card. DESIGN §5/§3. */
 import { sql } from "drizzle-orm";
 import { db } from "./index";
+import { metricsForNode, rankForReach, globeOverlayForNode } from "./graph";
 
 export type LeaderRow = {
   code: string;
@@ -136,83 +137,34 @@ export async function meDetail(code: string): Promise<{
  */
 export async function meBundle(code: string): Promise<{
   you: { lat: number; lng: number } | null;
+  devices: { lat: number; lng: number }[];
   incoming: GlobeArc[];
   outgoing: GlobeArc[];
   referrer: { lat: number | null; lng: number | null } | null;
   metrics: { reach: number; direct: number; maxDepth: number; countries: number };
   rank: { rank: number; percentile: number } | null;
 } | null> {
-  const r = (await db.execute(sql`
-    WITH me AS (
-      SELECT id, referrer_id, reach, lat, lng FROM (
-        SELECT n.id, n.referrer_id, n.lat, n.lng,
-               COALESCE(m.reach,0) AS reach, COALESCE(m.direct,0) AS direct,
-               COALESCE(m.max_depth,0) AS max_depth, COALESCE(m.countries,0) AS countries
-        FROM nodes n LEFT JOIN cached_metrics m ON m.node_id = n.id
-        WHERE n.code = ${code} LIMIT 1
-      ) x
-    ),
-    metrics AS (
-      SELECT COALESCE(m.reach,0) reach, COALESCE(m.direct,0) direct,
-             COALESCE(m.max_depth,0) "maxDepth", COALESCE(m.countries,0) countries
-      FROM me JOIN cached_metrics m ON m.node_id = me.id
-    ),
-    parent AS (
-      SELECT lat, lng FROM nodes WHERE id = (SELECT referrer_id FROM me)
-    ),
-    children AS (
-      SELECT lat, lng FROM nodes
-      WHERE referrer_id = (SELECT id FROM me) AND class = 'human' AND lat IS NOT NULL
-      ORDER BY created_at DESC LIMIT 40
-    ),
-    rank AS (
-      SELECT
-        (SELECT COUNT(*) FROM cached_metrics m JOIN nodes n ON n.id=m.node_id
-           WHERE n.class='human' AND m.reach > (SELECT reach FROM me)) + 1 AS rank,
-        (SELECT COUNT(*) FROM nodes WHERE class='human') AS total
-    )
-    SELECT
-      (SELECT lat FROM me) AS me_lat, (SELECT lng FROM me) AS me_lng,
-      (SELECT lat FROM parent) AS p_lat, (SELECT lng FROM parent) AS p_lng,
-      (SELECT json_agg(json_build_object('lat',lat,'lng',lng)) FROM children) AS children,
-      (SELECT row_to_json(metrics) FROM metrics) AS metrics,
-      (SELECT rank FROM rank) AS rank, (SELECT total FROM rank) AS total,
-      EXISTS (SELECT 1 FROM me) AS found;
-  `)) as unknown as {
-    rows: {
-      me_lat: number | null; me_lng: number | null;
-      p_lat: number | null; p_lng: number | null;
-      children: { lat: number; lng: number }[] | null;
-      metrics: { reach: number; direct: number; maxDepth: number; countries: number } | null;
-      rank: number | null; total: number | null; found: boolean;
-    }[];
-  };
+  const nodeR = (await db.execute(sql`
+    SELECT id FROM nodes WHERE code = ${code} LIMIT 1;
+  `)) as unknown as { rows: { id: number }[] };
+  const node = nodeR.rows?.[0];
+  if (!node) return null;
 
-  const row = r.rows?.[0];
-  if (!row || !row.found) return null;
-
-  const you = row.me_lat != null && row.me_lng != null ? { lat: row.me_lat, lng: row.me_lng } : null;
-
-  const incoming: GlobeArc[] =
-    you && row.p_lat != null && row.p_lng != null
-      ? [{ sx: row.p_lng, sy: row.p_lat, ex: you.lng, ey: you.lat }]
-      : [];
-
-  const outgoing: GlobeArc[] =
-    you == null
-      ? []
-      : (row.children ?? []).map((c) => ({ sx: you.lng, sy: you.lat, ex: Number(c.lng), ey: Number(c.lat) }));
-
-  const total = Number(row.total) || 1;
-  const rank = row.rank != null ? Number(row.rank) : null;
+  const metrics = await metricsForNode(node.id);
+  const [rank, globe] = await Promise.all([
+    rankForReach(metrics.reach),
+    globeOverlayForNode(node.id),
+  ]);
+  if (!globe) return null;
 
   return {
-    you,
-    incoming,
-    outgoing,
-    referrer: row.p_lat != null ? { lat: row.p_lat, lng: row.p_lng } : null,
-    metrics: row.metrics ?? { reach: 0, direct: 0, maxDepth: 0, countries: 0 },
-    rank: rank != null ? { rank, percentile: Math.round((1 - rank / total) * 100) } : null,
+    you: globe.you,
+    devices: globe.devices,
+    incoming: globe.incoming,
+    outgoing: globe.outgoing,
+    referrer: globe.referrer,
+    metrics,
+    rank,
   };
 }
 

@@ -6,7 +6,7 @@ import {
   createNode,
   resolveNode,
   nodeByCode,
-  subtreeMetrics,
+  metricsForNode,
   bumpAncestors,
   type CreatedNode,
 } from "@/db/graph";
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
   // ── Existing identity? localId → fingerprint fallback. No new node, no re-parent. ──
   const existing = await resolveNode(localId, fpHash);
   if (existing) {
-    const metrics = await subtreeMetrics(existing.id);
+    const metrics = await metricsForNode(existing.id);
     const res = NextResponse.json({
       code: existing.code,
       isNew: false,
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
     // unique(local_id) race → treat as existing
     const retry = await resolveNode(localId, fpHash);
     if (retry) {
-      const metrics = await subtreeMetrics(retry.id);
+      const metrics = await metricsForNode(retry.id);
       const res = NextResponse.json({ code: retry.code, isNew: false, metrics });
       setCookie(res, localId);
       return res;
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
     }),
   });
 
-  const metrics = await subtreeMetrics(created.id);
+  const metrics = await metricsForNode(created.id);
   const res = NextResponse.json({
     code: created.code,
     isNew: true,

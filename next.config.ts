@@ -4,6 +4,7 @@ import { withBotId } from "botid/next/config";
 const nextConfig: NextConfig = {
   // Pin workspace root (multiple lockfiles exist above this dir).
   turbopack: { root: __dirname },
+  allowedDevOrigins: ["192.168.1.244", "192.168.1.244:3000"],
 };
 
 // Vercel BotID only makes sense on Vercel (it needs the platform challenge infra).

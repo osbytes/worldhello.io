@@ -99,25 +99,27 @@ function HeroArc({ arc, color }: { arc: GlobeArc; color: string }) {
   );
 }
 
-/** Glowing marker at the "you" node. */
-function YouPulse({ lat, lng }: { lat: number; lng: number }) {
+/** Glowing marker at an account device. Primary = this browser's device. */
+function YouPulse({ lat, lng, primary = false }: { lat: number; lng: number; primary?: boolean }) {
   const ref = useRef<THREE.Mesh>(null);
   const pos = useMemo(() => latLngToVec3(lat, lng, GLOBE_RADIUS + 0.01), [lat, lng]);
   useFrame((s) => {
     if (ref.current) {
-      const k = 1 + Math.sin(s.clock.elapsedTime * 2.5) * 0.25;
+      const k = 1 + Math.sin(s.clock.elapsedTime * 2.5) * (primary ? 0.25 : 0.12);
       ref.current.scale.setScalar(k);
     }
   });
+  const core = primary ? "#ffffff" : BLUE;
+  const glow = primary ? PURPLE : BLUE;
   return (
     <group position={pos}>
       <mesh ref={ref}>
-        <sphereGeometry args={[0.03, 16, 16]} />
-        <meshBasicMaterial color="#ffffff" toneMapped={false} />
+        <sphereGeometry args={[primary ? 0.03 : 0.022, 16, 16]} />
+        <meshBasicMaterial color={core} toneMapped={false} />
       </mesh>
-      <mesh scale={2.2}>
-        <sphereGeometry args={[0.03, 16, 16]} />
-        <meshBasicMaterial color={PURPLE} transparent opacity={0.25} toneMapped={false} />
+      <mesh scale={primary ? 2.2 : 1.6}>
+        <sphereGeometry args={[primary ? 0.03 : 0.022, 16, 16]} />
+        <meshBasicMaterial color={glow} transparent opacity={primary ? 0.25 : 0.18} toneMapped={false} />
       </mesh>
     </group>
   );
@@ -126,14 +128,17 @@ function YouPulse({ lat, lng }: { lat: number; lng: number }) {
 function Scene({
   data,
   you,
+  devices,
   incoming,
   outgoing,
 }: {
   data: { points: GlobePoint[]; arcs: GlobeArc[] };
   you?: { lat: number; lng: number } | null;
+  devices?: { lat: number; lng: number }[];
   incoming?: GlobeArc[];
   outgoing?: GlobeArc[];
 }) {
+  const markers = devices?.length ? devices : you ? [you] : [];
   const group = useRef<THREE.Group>(null);
   useFrame((_, dt) => {
     if (group.current) group.current.rotation.y += dt * 0.03;
@@ -149,17 +154,26 @@ function Scene({
       {(outgoing ?? []).map((a, i) => (
         <HeroArc key={`out-${i}`} arc={a} color={PURPLE} />
       ))}
-      {you && <YouPulse lat={you.lat} lng={you.lng} />}
+      {markers.map((d, i) => (
+        <YouPulse
+          key={`dev-${i}`}
+          lat={d.lat}
+          lng={d.lng}
+          primary={!!you && d.lat === you.lat && d.lng === you.lng}
+        />
+      ))}
     </group>
   );
 }
 
 export default function Globe({
   you,
+  devices,
   incoming,
   outgoing,
 }: {
   you?: { lat: number; lng: number } | null;
+  devices?: { lat: number; lng: number }[];
   incoming?: GlobeArc[];
   outgoing?: GlobeArc[];
 }) {
@@ -169,7 +183,7 @@ export default function Globe({
   return (
     <Canvas camera={{ position: [0, 0, 5.6], fov: 42 }} dpr={[1, 2]} className="!absolute inset-0">
       <ambientLight intensity={0.8} />
-      <Scene data={scene} you={you} incoming={incoming} outgoing={outgoing} />
+      <Scene data={scene} you={you} devices={devices} incoming={incoming} outgoing={outgoing} />
       <OrbitControls
         enablePan={false}
         enableZoom={false}

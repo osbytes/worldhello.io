@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { registerNode, type NodeResponse } from "./client-identity";
 import type { MeDetail } from "./types";
 import type { GlobePoint, GlobeArc, LeaderRow } from "@/db/reads";
@@ -9,6 +9,16 @@ async function json<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
   return r.json() as Promise<T>;
+}
+
+/** Refetch dashboard data after a device link / unlink / email verify. */
+export function invalidateAfterLinkChange(queryClient: QueryClient, nodeCode?: string) {
+  if (nodeCode) {
+    void queryClient.invalidateQueries({ queryKey: ["me", nodeCode] });
+  }
+  void queryClient.invalidateQueries({ queryKey: ["register"] });
+  void queryClient.invalidateQueries({ queryKey: ["globe"] });
+  void queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
 }
 
 /**

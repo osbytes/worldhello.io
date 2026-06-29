@@ -11,6 +11,7 @@ function appSecret(): string {
 const SECRET = appSecret();
 
 export const MAGIC_TTL_MS = 1000 * 60 * 30; // 30 min
+export const LINK_TTL_MS = 1000 * 60 * 10; // 10 min — immediate device pairing
 
 /**
  * Magic-link token = base64url(nonce).sig. The nonce is a random id; the email +

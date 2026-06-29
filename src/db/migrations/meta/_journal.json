@@ -22,6 +22,13 @@
       "when": 1782096167784,
       "tag": "0002_stormy_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782744918090,
+      "tag": "0003_easy_inhumans",
+      "breakpoints": true
     }
   ]
 }

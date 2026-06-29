@@ -49,6 +49,24 @@ export const magicTokens = pgTable(
 );
 
 /**
+ * Short-lived device-pairing codes. Source localId held server-side.
+ * Consumed (deleted) on first successful accept → single-use. Expired rows reaped.
+ */
+export const linkTokens = pgTable(
+  "link_tokens",
+  {
+    code: text("code").primaryKey(),
+    sourceLocalId: text("source_local_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("link_tokens_expires_idx").on(t.expiresAt),
+    index("link_tokens_source_idx").on(t.sourceLocalId),
+  ],
+);
+
+/**
  * A node = one device/identity in the referral graph.
  * `referrer_id` is WRITE-ONCE (enforced in app layer + trigger). See DESIGN §2.
  */

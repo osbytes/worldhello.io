@@ -4,6 +4,7 @@ export type Metrics = { reach: number; direct: number; maxDepth: number; countri
 
 export type MeDetail = {
   you: { lat: number; lng: number } | null;
+  devices: { lat: number; lng: number }[];
   incoming: GlobeArc[];
   outgoing: GlobeArc[];
   referrer: { lat: number | null; lng: number | null } | null;

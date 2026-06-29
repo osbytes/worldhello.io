@@ -64,7 +64,12 @@ export default function Hero({ node, me }: { node: NodeResponse | null; me: MeDe
         {/* Canvas overflows on md+ (so arcs aren't clipped); on mobile it stays inside
             the box to avoid forcing horizontal page scroll. */}
         <div className="pointer-events-auto absolute inset-0 md:inset-[-15%]">
-          <Globe you={me?.you ?? null} incoming={me?.incoming} outgoing={me?.outgoing} />
+          <Globe
+            you={me?.you ?? null}
+            devices={me?.devices}
+            incoming={me?.incoming}
+            outgoing={me?.outgoing}
+          />
         </div>
 
         {m && (

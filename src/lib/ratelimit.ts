@@ -32,6 +32,8 @@ const byLocal = limiter(8, "1 m"); // a human can't honestly create 8 nodes/min
 const byFingerprint = limiter(20, "1 m"); // looser; fp shared across NAT siblings
 const byReferrer = limiter(120, "1 h"); // farm-your-own-link fan-out cap
 const byIpGlobal = limiter(600, "1 m"); // script-grade only; never trips a crowd
+const byLinkCreate = limiter(12, "1 h"); // pairing codes per device
+const byLinkAccept = limiter(20, "1 m"); // brute-force guard on 6-char codes
 
 export type AdmitInput = {
   localId: string;
@@ -59,4 +61,18 @@ export async function admit(i: AdmitInput): Promise<AdmitResult> {
     if (!success) return { ok: false, reason };
   }
   return { ok: true };
+}
+
+/** Rate-limit device-pairing code creation (per source localId). */
+export async function admitLinkCreate(localId: string): Promise<AdmitResult> {
+  if (!redis || !byLinkCreate) return { ok: true };
+  const { success } = await byLinkCreate.limit(`link:create:${localId}`);
+  return success ? { ok: true } : { ok: false, reason: "link_create_velocity" };
+}
+
+/** Rate-limit pairing-code guess attempts (per target localId). */
+export async function admitLinkAccept(localId: string): Promise<AdmitResult> {
+  if (!redis || !byLinkAccept) return { ok: true };
+  const { success } = await byLinkAccept.limit(`link:accept:${localId}`);
+  return success ? { ok: true } : { ok: false, reason: "link_accept_velocity" };
 }

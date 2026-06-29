@@ -3,6 +3,39 @@
 import FingerprintJS from "@fingerprintjs/fingerprintjs";
 
 const LID_KEY = "wh_lid";
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** RFC-4122 v4 UUID. Works on plain HTTP LAN IPs where crypto.randomUUID is unavailable. */
+function newLocalId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      /* non-secure context (e.g. http://192.168.x.x) — fall through */
+    }
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function readCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function persistLocalId(id: string): void {
+  try {
+    localStorage.setItem(LID_KEY, id);
+  } catch {
+    /* private mode may throw */
+  }
+  document.cookie = `${LID_KEY}=${id};path=/;max-age=${60 * 60 * 24 * 730};samesite=lax`;
+}
 
 /** Stable client UUID — localStorage primary, cookie mirror (DESIGN §2 identity layer 1). */
 export function getLocalId(): string {
@@ -12,20 +45,12 @@ export function getLocalId(): string {
   } catch {
     /* private mode may throw */
   }
-  if (!id) {
-    id =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}-4xxx`.replace(
-            /x/g,
-            () => Math.floor(Math.random() * 16).toString(16),
-          );
-    try {
-      localStorage.setItem(LID_KEY, id);
-    } catch {
-      /* ignore */
-    }
-    document.cookie = `${LID_KEY}=${id};path=/;max-age=${60 * 60 * 24 * 730};samesite=lax`;
+  if (!id) id = readCookie(LID_KEY);
+
+  // Regenerate if missing or not a valid UUID (legacy fallback IDs fail server validation).
+  if (!UUID_RE.test(id)) {
+    id = newLocalId();
+    persistLocalId(id);
   }
   return id;
 }
@@ -112,12 +137,12 @@ export async function registerNode(ref: string | null): Promise<NodeResponse | n
 
   const payload = {
     localId,
-    fingerprint: fingerprint ?? undefined,
-    ref: ref ?? undefined,
+    fingerprint: fingerprint || undefined,
+    ref: ref && ref.length >= 4 ? ref : undefined,
     incognito,
     botd,
     referer,
-    src,
+    src: src && src.length > 0 ? src : undefined,
   };
 
   let res: Response;

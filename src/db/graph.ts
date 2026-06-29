@@ -8,6 +8,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "./index";
 import { MAX_DEPTH } from "@/lib/codes";
+import type { GlobeArc } from "./reads";
 
 export type CreateNodeInput = {
   code: string;
@@ -165,6 +166,214 @@ export async function subtreeMetrics(nodeId: number): Promise<Metrics> {
     maxDepth: Number(row?.maxDepth ?? 0),
     countries: Number(row?.countries ?? 0),
   };
+}
+
+/**
+ * Union of all device subtrees for a linked account, deduped (DESIGN §5.5).
+ * Account devices and internal sibling edges are excluded from reach/direct.
+ */
+export async function accountMetrics(accountId: number): Promise<Metrics> {
+  const r = (await db.execute(sql`
+    WITH account_nodes AS (
+      SELECT id, path, depth FROM nodes
+      WHERE account_id = ${accountId} AND class = 'human'
+    ),
+    device_ids AS (
+      SELECT id FROM account_nodes
+    ),
+    union_nodes AS (
+      SELECT DISTINCT n.id, n.country, n.depth, n.referrer_id
+      FROM nodes n
+      INNER JOIN account_nodes an ON n.path <@ an.path
+      WHERE n.class = 'human'
+    ),
+    min_depth AS (
+      SELECT MIN(depth) AS d FROM account_nodes
+    )
+    SELECT
+      (SELECT COUNT(*)::int FROM union_nodes u
+        WHERE u.id NOT IN (SELECT id FROM device_ids)) AS reach,
+      (SELECT COUNT(*)::int FROM union_nodes u
+        WHERE u.referrer_id IN (SELECT id FROM device_ids)
+          AND u.id NOT IN (SELECT id FROM device_ids)) AS direct,
+      (SELECT COALESCE(MAX(u.depth) - (SELECT d FROM min_depth), 0)::int
+        FROM union_nodes u) AS "maxDepth",
+      (SELECT COUNT(DISTINCT u.country)::int FROM union_nodes u
+        WHERE u.country IS NOT NULL) AS countries;
+  `)) as unknown as { rows: Metrics[] };
+  const row = r.rows?.[0];
+  return {
+    reach: Number(row?.reach ?? 0),
+    direct: Number(row?.direct ?? 0),
+    maxDepth: Number(row?.maxDepth ?? 0),
+    countries: Number(row?.countries ?? 0),
+  };
+}
+
+/** Per-node metrics, or account-aggregated when grouped with other devices. */
+export async function metricsForNode(nodeId: number): Promise<Metrics> {
+  const acc = (await db.execute(sql`
+    SELECT account_id AS "accountId" FROM nodes WHERE id = ${nodeId} LIMIT 1;
+  `)) as unknown as { rows: { accountId: number | null }[] };
+  const accountId = acc.rows?.[0]?.accountId;
+  if (accountId != null) {
+    const siblings = (await db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM nodes
+      WHERE account_id = ${accountId} AND id <> ${nodeId};
+    `)) as unknown as { rows: { n: number }[] };
+    if ((siblings.rows?.[0]?.n ?? 0) > 0) return accountMetrics(accountId);
+  }
+  return subtreeMetrics(nodeId);
+}
+
+/** Leaderboard rank for a reach score (node or account-aggregated). */
+export async function rankForReach(
+  reach: number,
+): Promise<{ rank: number; percentile: number } | null> {
+  const r = (await db.execute(sql`
+    SELECT
+      (SELECT COUNT(*) FROM cached_metrics m JOIN nodes n ON n.id = m.node_id
+         WHERE n.class = 'human' AND m.reach > ${reach}) + 1 AS rank,
+      (SELECT COUNT(*) FROM nodes WHERE class = 'human') AS total;
+  `)) as unknown as { rows: { rank: number; total: number }[] };
+  const row = r.rows?.[0];
+  if (!row) return null;
+  const total = Number(row.total) || 1;
+  const rank = Number(row.rank);
+  return { rank, percentile: Math.round((1 - rank / total) * 100) };
+}
+
+export type GlobeOverlay = {
+  you: { lat: number; lng: number } | null;
+  devices: { lat: number; lng: number }[];
+  incoming: GlobeArc[];
+  outgoing: GlobeArc[];
+  referrer: { lat: number | null; lng: number | null } | null;
+};
+
+function dedupeArcs(arcs: GlobeArc[]): GlobeArc[] {
+  const seen = new Set<string>();
+  return arcs.filter((a) => {
+    const k = `${a.sx},${a.sy}->${a.ex},${a.ey}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/** Per-node globe arcs (single device, no account group). */
+async function nodeGlobeOverlay(nodeId: number): Promise<GlobeOverlay> {
+  const nodeR = (await db.execute(sql`
+    SELECT lat, lng, referrer_id AS "referrerId"
+    FROM nodes WHERE id = ${nodeId} LIMIT 1;
+  `)) as unknown as {
+    rows: { lat: number | null; lng: number | null; referrerId: number | null }[];
+  };
+  const node = nodeR.rows?.[0];
+  const you =
+    node?.lat != null && node?.lng != null ? { lat: node.lat, lng: node.lng } : null;
+
+  let incoming: GlobeArc[] = [];
+  let referrer: { lat: number | null; lng: number | null } | null = null;
+  if (node?.referrerId != null) {
+    const p = (await db.execute(sql`
+      SELECT lat, lng FROM nodes WHERE id = ${node.referrerId} LIMIT 1;
+    `)) as unknown as { rows: { lat: number | null; lng: number | null }[] };
+    const par = p.rows?.[0];
+    if (par && par.lat != null && par.lng != null && you) {
+      referrer = par;
+      incoming = [{ sx: par.lng, sy: par.lat, ex: you.lng, ey: you.lat }];
+    }
+  }
+
+  const ch = (await db.execute(sql`
+    SELECT lat, lng FROM nodes
+    WHERE referrer_id = ${nodeId} AND class = 'human' AND lat IS NOT NULL
+    ORDER BY created_at DESC LIMIT 40;
+  `)) as unknown as { rows: { lat: number; lng: number }[] };
+  const outgoing: GlobeArc[] =
+    you == null
+      ? []
+      : (ch.rows ?? []).map((c) => ({ sx: you.lng, sy: you.lat, ex: Number(c.lng), ey: Number(c.lat) }));
+
+  return { you, devices: you ? [you] : [], incoming, outgoing, referrer };
+}
+
+/** Union of all account devices' arcs on the globe (DESIGN §5.5). */
+async function accountGlobeOverlay(nodeId: number, accountId: number): Promise<GlobeOverlay> {
+  const base = await nodeGlobeOverlay(nodeId);
+
+  const devicesR = (await db.execute(sql`
+    SELECT lat, lng FROM nodes
+    WHERE account_id = ${accountId} AND class = 'human' AND lat IS NOT NULL;
+  `)) as unknown as { rows: { lat: number; lng: number }[] };
+
+  const incomingR = (await db.execute(sql`
+    WITH account_devices AS (
+      SELECT id, lat, lng, referrer_id FROM nodes
+      WHERE account_id = ${accountId} AND class = 'human'
+    )
+    SELECT par.lng AS sx, par.lat AS sy, an.lng AS ex, an.lat AS ey
+    FROM account_devices an
+    JOIN nodes par ON par.id = an.referrer_id
+    WHERE par.lat IS NOT NULL AND an.lat IS NOT NULL;
+  `)) as unknown as { rows: GlobeArc[] };
+
+  const outgoingR = (await db.execute(sql`
+    WITH account_devices AS (
+      SELECT id, lat, lng FROM nodes
+      WHERE account_id = ${accountId} AND class = 'human' AND lat IS NOT NULL
+    )
+    SELECT p.lng AS sx, p.lat AS sy, c.lng AS ex, c.lat AS ey
+    FROM nodes c
+    JOIN account_devices p ON c.referrer_id = p.id
+    WHERE c.class = 'human' AND c.lat IS NOT NULL
+      AND c.id NOT IN (SELECT id FROM account_devices)
+    ORDER BY c.created_at DESC
+    LIMIT 80;
+  `)) as unknown as { rows: GlobeArc[] };
+
+  const devices = (devicesR.rows ?? []).map((d) => ({ lat: Number(d.lat), lng: Number(d.lng) }));
+
+  return {
+    you: base.you,
+    devices,
+    incoming: dedupeArcs(
+      (incomingR.rows ?? []).map((a) => ({
+        sx: Number(a.sx),
+        sy: Number(a.sy),
+        ex: Number(a.ex),
+        ey: Number(a.ey),
+      })),
+    ),
+    outgoing: dedupeArcs(
+      (outgoingR.rows ?? []).map((a) => ({
+        sx: Number(a.sx),
+        sy: Number(a.sy),
+        ex: Number(a.ex),
+        ey: Number(a.ey),
+      })),
+    ),
+    referrer: base.referrer,
+  };
+}
+
+/** Globe overlay for a node — account-aggregated when linked, otherwise per-device. */
+export async function globeOverlayForNode(nodeId: number): Promise<GlobeOverlay | null> {
+  const r = (await db.execute(sql`
+    SELECT account_id AS "accountId" FROM nodes WHERE id = ${nodeId} LIMIT 1;
+  `)) as unknown as { rows: { accountId: number | null }[] };
+  const accountId = r.rows?.[0]?.accountId;
+  if (accountId != null) {
+    const siblings = (await db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM nodes
+      WHERE account_id = ${accountId} AND id <> ${nodeId};
+    `)) as unknown as { rows: { n: number }[] };
+    if ((siblings.rows?.[0]?.n ?? 0) > 0) {
+      return accountGlobeOverlay(nodeId, accountId);
+    }
+  }
+  return nodeGlobeOverlay(nodeId);
 }
 
 /** Ancestry root→node, for highlighting the user's lineage on the globe. */

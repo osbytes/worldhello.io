@@ -26,3 +26,8 @@ export function hash(value: string): string {
 export function emailHash(email: string): string {
   return hashKeyed(email.trim().toLowerCase());
 }
+
+/** Synthetic account key for device-only linking (no email). */
+export function deviceAccountHash(sourceLocalId: string): string {
+  return hashKeyed(`device:${sourceLocalId}`);
+}
